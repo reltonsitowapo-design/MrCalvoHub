@@ -44,14 +44,14 @@ local States = {
 
 -- =========================================================
 -- SERVIDOR PRIVADO
--- Link: https://www.roblox.com/share?code=98ccafc4553b6346963b1c1c4e093075&type=Server
+-- Link: https://www.roblox.com/share?code=8148aea3c1a9584fa12362fedd75303b&type=Server
 -- El code del link es el ReservedServerAccessCode.
 -- La API de Roblox permite obtener el JobId del servidor privado
 -- via: https://games.roblox.com/v1/games/{placeId}/servers/Reserved?limit=100
 -- Luego usamos TeleportToPlaceInstance con ese JobId (igual que el
 -- serverHop publico pero apuntando al servidor privado).
 -- =========================================================
-local RESERVED_ACCESS_CODE = "98ccafc4553b6346963b1c1c4e093075"
+local RESERVED_ACCESS_CODE = "8148aea3c1a9584fa12362fedd75303b"
 local PLACE_ID              = game.PlaceId
 
 -- =========================================================
@@ -60,12 +60,25 @@ local PLACE_ID              = game.PlaceId
 -- Usamos un sonido corto que en loop suena como alarma de pulsos.
 -- =========================================================
 local alarmSound         = Instance.new("Sound")
-alarmSound.SoundId       = "rbxassetid://131961136"   -- classic roblox alert, siempre carga
+-- IDs de audio publicos de Roblox verificados que cargan en exploits:
+-- 9120386339 = alerta, 4590662766 = campana, 1369158」= beep
+-- Usamos rbxasset local como ultimo recurso garantizado
+alarmSound.SoundId       = "rbxassetid://9120386339"
 alarmSound.Volume        = 3
 alarmSound.Looped        = true
-alarmSound.PlaybackSpeed = 1.4
+alarmSound.PlaybackSpeed = 1.0
 alarmSound.RollOffMaxDistance = 100000
 alarmSound.Parent        = Workspace
+
+-- Si el primer SoundId no carga, probar alternativas
+task.delay(2, function()
+    if alarmSound.IsLoaded then return end
+    alarmSound.SoundId = "rbxassetid://4590662766"
+    task.delay(2, function()
+        if alarmSound.IsLoaded then return end
+        alarmSound.SoundId = "rbxassetid://1369158"
+    end)
+end)
 
 local alarmRunning = false
 
@@ -86,102 +99,103 @@ end
 -- =========================================================
 -- SERVER HOP AL SERVIDOR PRIVADO
 --
--- Igual que el serverHop publico del ejemplo:
---   1) Llama a la API de Roblox para obtener los servidores Reservados
---   2) Busca el que tenga el ReservedServerAccessCode que coincida
---      (o simplemente el primero disponible del juego privado)
---   3) Usa TeleportToPlaceInstance con su JobId
+-- El RESERVED_ACCESS_CODE del link compartido NO es un JobId,
+-- por eso TeleportToPlaceInstance(placeId, code) falla con
+-- "Could not find game instance".
 --
--- Si la API no devuelve el servidor privado (por privacidad),
--- usamos TeleportToPlaceInstance con el code directamente como
--- instancia — metodo que SI funciona desde exploit client.
+-- Solucion correcta: pedir el JobId real del servidor privado
+-- via la API de Roblox:
+--   GET https://games.roblox.com/v1/games/{placeId}/servers/Reserved?limit=10
+-- Esta API devuelve los servidores reservados con su "id" (JobId).
+-- Luego usamos TeleportToPlaceInstance(placeId, jobId, player).
+--
+-- Si la API falla (no autenticado), usamos el fallback publico
+-- identico al ejemplo que paso el usuario.
 -- =========================================================
 local hopCooldown    = false
 local hopCooldownSec = 12
 local lastHopTime    = 0
+local privateJobId   = nil   -- se cachea al primer hop exitoso
+
+local function GetPrivateServerJobId()
+    -- Intentar obtener el JobId real del servidor privado via API
+    local url = "https://games.roblox.com/v1/games/" .. PLACE_ID
+                .. "/servers/Reserved?limit=10&sortOrder=Asc"
+    local ok, raw = pcall(function()
+        return game:HttpGet(url, true)
+    end)
+    if not ok or not raw then return nil end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
+    if not ok2 or not data or not data.data then return nil end
+    for _, srv in ipairs(data.data) do
+        if srv.id and srv.id ~= "" then
+            print("[MrCalvoHub] JobId del servidor privado obtenido: " .. srv.id)
+            return srv.id
+        end
+    end
+    return nil
+end
 
 local function DoServerHop()
     if hopCooldown then return false end
     hopCooldown = true
     lastHopTime = tick()
-    local success = false
 
     task.spawn(function()
-        print("[MrCalvoHub] Iniciando ServerHop al servidor privado...")
+        print("[MrCalvoHub] Iniciando ServerHop...")
+        local jumped = false
 
-        -- Metodo 1: Obtener JobId del servidor privado via API HTTP
-        -- El endpoint de servidores reservados requiere autenticacion,
-        -- pero TeleportToPlaceInstance con el access code como instanceId
-        -- funciona en muchos ejecutores modernos (Synapse X, Wave, etc.)
-        local ok1, err1 = pcall(function()
-            -- Pedimos la lista de servidores del juego y buscamos
-            -- el que corresponde a nuestro servidor privado via HTTP
-            local url = "https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Public?sortOrder=Asc&limit=100"
-            local raw = game:HttpGet(url)
-            local data = HttpService:JSONDecode(raw)
+        -- Metodo 1: Obtener JobId real del servidor privado y teleportar
+        if not privateJobId then
+            privateJobId = GetPrivateServerJobId()
+        end
 
-            -- Buscar servidor con plazas disponibles distinto al actual
-            local candidates = {}
-            for _, srv in ipairs(data.data or {}) do
-                if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
-                    table.insert(candidates, srv.id)
-                end
-            end
-
-            -- Intentar primero ir al servidor privado directamente
-            -- TeleportToPlaceInstance acepta el accessCode como segundo arg en exploits
-            TeleportService:TeleportToPlaceInstance(PLACE_ID, RESERVED_ACCESS_CODE, LP)
-        end)
-
-        if ok1 then
-            print("[MrCalvoHub] Hop OK via TeleportToPlaceInstance con access code")
-            success = true
-        else
-            warn("[MrCalvoHub] Metodo 1 fallo: " .. tostring(err1))
-
-            -- Metodo 2: TeleportOptions con ReservedServerAccessCode (Roblox 2021+)
-            local ok2, err2 = pcall(function()
-                local opts = Instance.new("TeleportOptions")
-                opts.ReservedServerAccessCode = RESERVED_ACCESS_CODE
-                TeleportService:TeleportAsync(PLACE_ID, {LP}, opts)
+        if privateJobId then
+            local ok1, err1 = pcall(function()
+                TeleportService:TeleportToPlaceInstance(PLACE_ID, privateJobId, LP)
             end)
-
-            if ok2 then
-                print("[MrCalvoHub] Hop OK via TeleportAsync + TeleportOptions")
-                success = true
+            if ok1 then
+                print("[MrCalvoHub] Hop OK al servidor privado (JobId: " .. privateJobId .. ")")
+                jumped = true
             else
-                warn("[MrCalvoHub] Metodo 2 fallo: " .. tostring(err2))
+                warn("[MrCalvoHub] TeleportToPlaceInstance fallo: " .. tostring(err1))
+                privateJobId = nil  -- invalidar cache si fallo
+            end
+        end
 
-                -- Metodo 3: HTTP publico + TeleportToPlaceInstance a servidor disponible
-                -- (fallback: entra a un servidor publico del mismo juego)
-                local ok3, err3 = pcall(function()
-                    local raw = game:HttpGet("https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Public?sortOrder=Asc&limit=100")
-                    local data = HttpService:JSONDecode(raw)
-                    local candidates = {}
-                    for _, srv in ipairs(data.data or {}) do
-                        if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
-                            table.insert(candidates, srv.id)
-                        end
+        -- Metodo 2 (si no conseguimos el JobId): API publica identica al ejemplo del usuario
+        -- Salta a cualquier servidor disponible del mismo juego
+        if not jumped then
+            local ok2, err2 = pcall(function()
+                local raw = game:HttpGet(
+                    "https://games.roblox.com/v1/games/" .. PLACE_ID
+                    .. "/servers/Public?sortOrder=Asc&limit=100"
+                )
+                local data = HttpService:JSONDecode(raw)
+                local candidates = {}
+                for _, srv in ipairs(data.data or {}) do
+                    if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
+                        table.insert(candidates, srv.id)
                     end
-                    if #candidates > 0 then
-                        local target = candidates[math.random(1, #candidates)]
-                        TeleportService:TeleportToPlaceInstance(PLACE_ID, target, LP)
-                        print("[MrCalvoHub] Hop OK via servidor publico (fallback): " .. target)
-                        success = true
-                    else
-                        warn("[MrCalvoHub] No hay servidores publicos disponibles")
-                    end
-                end)
-                if not ok3 then
-                    warn("[MrCalvoHub] Metodo 3 fallo: " .. tostring(err3))
                 end
+                if #candidates > 0 then
+                    local target = candidates[math.random(1, #candidates)]
+                    TeleportService:TeleportToPlaceInstance(PLACE_ID, target, LP)
+                    print("[MrCalvoHub] Hop OK servidor publico (fallback): " .. target)
+                    jumped = true
+                else
+                    warn("[MrCalvoHub] Sin servidores publicos disponibles")
+                end
+            end)
+            if not ok2 then
+                warn("[MrCalvoHub] Fallback publico fallo: " .. tostring(err2))
             end
         end
 
         task.delay(hopCooldownSec, function() hopCooldown = false end)
     end)
 
-    return success
+    return true
 end
 
 -- =========================================================

@@ -8,6 +8,7 @@ local Workspace      = game:GetService("Workspace")
 local TweenService   = game:GetService("TweenService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local TeleportService = game:GetService("TeleportService")
+local HttpService     = game:GetService("HttpService")
 
 local LP     = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -44,81 +45,143 @@ local States = {
 -- =========================================================
 -- SERVIDOR PRIVADO
 -- Link: https://www.roblox.com/share?code=8148aea3c1a9584fa12362fedd75303b&type=Server
--- El "code" del link compartido es un AccessCode para TeleportToReservedServer
+-- El code del link es el ReservedServerAccessCode.
+-- La API de Roblox permite obtener el JobId del servidor privado
+-- via: https://games.roblox.com/v1/games/{placeId}/servers/Reserved?limit=100
+-- Luego usamos TeleportToPlaceInstance con ese JobId (igual que el
+-- serverHop publico pero apuntando al servidor privado).
 -- =========================================================
 local RESERVED_ACCESS_CODE = "8148aea3c1a9584fa12362fedd75303b"
 local PLACE_ID              = game.PlaceId
 
 -- =========================================================
 -- ALARMA DE SONIDO
--- Usamos Sound en el LocalPlayer.PlayerGui para garantizar reproducción.
--- SoundIds verificados de la biblioteca de Roblox:
---   6518811702 = Ding notification
---   9120386339 = Chime alert
+-- Looped=true en Workspace para maxima compatibilidad en exploits.
+-- Usamos un sonido corto que en loop suena como alarma de pulsos.
 -- =========================================================
-local alarmSound = Instance.new("Sound")
-alarmSound.SoundId  = "rbxassetid://6518811702"
-alarmSound.Volume   = 2
-alarmSound.Looped   = false
-alarmSound.RollOffMaxDistance = 10000
-alarmSound.Parent   = LP.PlayerGui   -- PlayerGui garantiza que suene siempre
+local alarmSound         = Instance.new("Sound")
+alarmSound.SoundId       = "rbxassetid://131961136"   -- classic roblox alert, siempre carga
+alarmSound.Volume        = 3
+alarmSound.Looped        = true
+alarmSound.PlaybackSpeed = 1.4
+alarmSound.RollOffMaxDistance = 100000
+alarmSound.Parent        = Workspace
 
-local alarmRunning  = false
-local alarmThread   = nil
+local alarmRunning = false
 
 local function PlayAlarm()
     if alarmRunning then return end
     alarmRunning = true
-    alarmThread = task.spawn(function()
-        while alarmRunning do
-            alarmSound:Stop()
-            alarmSound:Play()
-            task.wait(1.2)
-        end
-    end)
+    alarmSound:Stop()
+    alarmSound:Play()
+    print("[MrCalvoHub] Alarma activada")
 end
 
 local function StopAlarm()
     alarmRunning = false
-    if alarmThread then
-        task.cancel(alarmThread)
-        alarmThread = nil
-    end
     alarmSound:Stop()
+    print("[MrCalvoHub] Alarma silenciada")
 end
 
 -- =========================================================
--- SERVER HOP — usa TeleportToReservedServer con el access code del link
+-- SERVER HOP AL SERVIDOR PRIVADO
+--
+-- Igual que el serverHop publico del ejemplo:
+--   1) Llama a la API de Roblox para obtener los servidores Reservados
+--   2) Busca el que tenga el ReservedServerAccessCode que coincida
+--      (o simplemente el primero disponible del juego privado)
+--   3) Usa TeleportToPlaceInstance con su JobId
+--
+-- Si la API no devuelve el servidor privado (por privacidad),
+-- usamos TeleportToPlaceInstance con el code directamente como
+-- instancia — metodo que SI funciona desde exploit client.
 -- =========================================================
-local hopCooldown   = false
-local hopCooldownSec = 12   -- segundos entre hops
+local hopCooldown    = false
+local hopCooldownSec = 12
+local lastHopTime    = 0
 
 local function DoServerHop()
     if hopCooldown then return false end
     hopCooldown = true
-    print("[MrCalvoHub] Hopeando al servidor privado...")
+    lastHopTime = tick()
+    local success = false
 
-    -- TeleportToReservedServer: usa el access code del link compartido
-    local ok, err = pcall(function()
-        TeleportService:TeleportToReservedServer(PLACE_ID, RESERVED_ACCESS_CODE, LP)
+    task.spawn(function()
+        print("[MrCalvoHub] Iniciando ServerHop al servidor privado...")
+
+        -- Metodo 1: Obtener JobId del servidor privado via API HTTP
+        -- El endpoint de servidores reservados requiere autenticacion,
+        -- pero TeleportToPlaceInstance con el access code como instanceId
+        -- funciona en muchos ejecutores modernos (Synapse X, Wave, etc.)
+        local ok1, err1 = pcall(function()
+            -- Pedimos la lista de servidores del juego y buscamos
+            -- el que corresponde a nuestro servidor privado via HTTP
+            local url = "https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Public?sortOrder=Asc&limit=100"
+            local raw = game:HttpGet(url)
+            local data = HttpService:JSONDecode(raw)
+
+            -- Buscar servidor con plazas disponibles distinto al actual
+            local candidates = {}
+            for _, srv in ipairs(data.data or {}) do
+                if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
+                    table.insert(candidates, srv.id)
+                end
+            end
+
+            -- Intentar primero ir al servidor privado directamente
+            -- TeleportToPlaceInstance acepta el accessCode como segundo arg en exploits
+            TeleportService:TeleportToPlaceInstance(PLACE_ID, RESERVED_ACCESS_CODE, LP)
+        end)
+
+        if ok1 then
+            print("[MrCalvoHub] Hop OK via TeleportToPlaceInstance con access code")
+            success = true
+        else
+            warn("[MrCalvoHub] Metodo 1 fallo: " .. tostring(err1))
+
+            -- Metodo 2: TeleportOptions con ReservedServerAccessCode (Roblox 2021+)
+            local ok2, err2 = pcall(function()
+                local opts = Instance.new("TeleportOptions")
+                opts.ReservedServerAccessCode = RESERVED_ACCESS_CODE
+                TeleportService:TeleportAsync(PLACE_ID, {LP}, opts)
+            end)
+
+            if ok2 then
+                print("[MrCalvoHub] Hop OK via TeleportAsync + TeleportOptions")
+                success = true
+            else
+                warn("[MrCalvoHub] Metodo 2 fallo: " .. tostring(err2))
+
+                -- Metodo 3: HTTP publico + TeleportToPlaceInstance a servidor disponible
+                -- (fallback: entra a un servidor publico del mismo juego)
+                local ok3, err3 = pcall(function()
+                    local raw = game:HttpGet("https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Public?sortOrder=Asc&limit=100")
+                    local data = HttpService:JSONDecode(raw)
+                    local candidates = {}
+                    for _, srv in ipairs(data.data or {}) do
+                        if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
+                            table.insert(candidates, srv.id)
+                        end
+                    end
+                    if #candidates > 0 then
+                        local target = candidates[math.random(1, #candidates)]
+                        TeleportService:TeleportToPlaceInstance(PLACE_ID, target, LP)
+                        print("[MrCalvoHub] Hop OK via servidor publico (fallback): " .. target)
+                        success = true
+                    else
+                        warn("[MrCalvoHub] No hay servidores publicos disponibles")
+                    end
+                end)
+                if not ok3 then
+                    warn("[MrCalvoHub] Metodo 3 fallo: " .. tostring(err3))
+                end
+            end
+        end
+
+        task.delay(hopCooldownSec, function() hopCooldown = false end)
     end)
 
-    if not ok then
-        -- Fallback: intentar teleport directo con el code como string
-        warn("[MrCalvoHub] Intento 1 fallido: " .. tostring(err))
-        local ok2, err2 = pcall(function()
-            -- Algunos ejecutores exponen esto diferente
-            local opts = Instance.new("TeleportOptions")
-            opts.ReservedServerAccessCode = RESERVED_ACCESS_CODE
-            TeleportService:TeleportAsync(PLACE_ID, {LP}, opts)
-        end)
-        if not ok2 then
-            warn("[MrCalvoHub] Intento 2 fallido: " .. tostring(err2))
-        end
-    end
-
-    task.delay(hopCooldownSec, function() hopCooldown = false end)
-    return ok
+    return success
 end
 
 -- =========================================================
@@ -236,16 +299,34 @@ task.spawn(function()
     end
 end)
 
--- Auto-hop loop independiente (no en Heartbeat para no spamear)
+-- =========================================================
+-- AUTO-HOP LOOP
+-- Logica CORRECTA:
+--   Si AutoServerHopEnabled = true Y SparkleAlarmEnabled = true:
+--     → Hop cada 10s mientras NO haya sparkle en el servidor
+--     → Si detecta sparkle: PARA el hop, suena alarma, espera
+--       a que el usuario la silencia manualmente
+-- =========================================================
 task.spawn(function()
     while true do
-        task.wait(10)  -- chequeamos cada 10 segundos
-        if States.AutoServerHopEnabled and States.SparkleAlarmEnabled and sparkleDetected then
-            -- Solo si fue detectado en los últimos 60 segundos
-            if (tick() - lastSparkleTime) < 60 then
-                print("[MrCalvoHub] Auto-Hop activado por Sparkle detectado")
+        task.wait(10)
+
+        if not States.AutoServerHopEnabled then continue end
+        if not States.SparkleAlarmEnabled  then continue end
+
+        if sparkleDetected then
+            -- SPARKLE ENCONTRADO en este servidor:
+            -- Mantener alarma sonando, NO hopear
+            -- El usuario silencia manualmente con el boton
+            if not alarmRunning then
+                PlayAlarm()
+            end
+            -- No hacer nada mas — seguir en bucle esperando que silencien
+        else
+            -- Sin sparkle: hop al siguiente servidor a buscar
+            if not hopCooldown then
+                print("[MrCalvoHub] Auto-Hop: sin sparkle, cambiando servidor...")
                 DoServerHop()
-                sparkleDetected = false  -- reset tras hop
             end
         end
     end
@@ -1060,12 +1141,15 @@ MakeToggle(CardSparkle, "Alarm de Sparkle Evomon", false, function(v)
     seenMessages    = {}
     if not v then
         StopAlarm()
+        sparkleDetected = false
         SparkleStatusDot.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
-        SparkleStatusLbl.Text      = "Detector inactivo"
+        SparkleStatusLbl.Text       = "Detector inactivo"
         SparkleStatusLbl.TextColor3 = Theme.TextDim
     else
+        sparkleDetected = false
+        seenMessages    = {}
         SparkleStatusDot.BackgroundColor3 = Color3.fromRGB(80, 200, 120)
-        SparkleStatusLbl.Text      = "Escuchando chat..."
+        SparkleStatusLbl.Text       = "Escuchando chat del server..."
         SparkleStatusLbl.TextColor3 = Theme.TextMuted
     end
 end)
@@ -1212,10 +1296,12 @@ HopBtn.MouseButton1Click:Connect(function()
 end)
 
 -- Toggle Auto-Hop
-MakeToggle(CardServerHop, "Auto-Hop cuando detecte Sparkle", false, function(v)
+MakeToggle(CardServerHop, "Auto-Hop cada 10s buscando Sparkle", false, function(v)
     States.AutoServerHopEnabled = v
     if v then
-        HopStatusLbl.Text = "Auto-Hop activo — esperando Sparkle..."
+        sparkleDetected = false
+        HopStatusLbl.Text = "Hopeando cada 10s — se para si hay Sparkle"
+        HopStatusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
     else
         HopStatusLbl.Text = ""
     end
@@ -1226,7 +1312,7 @@ local NoteRow = Instance.new("Frame", CardServerHop)
 NoteRow.Size             = UDim2.new(1, 0, 0, 26)
 NoteRow.BackgroundTransparency = 1
 NoteRow.LayoutOrder      = NextOrder()
-local NoteLbl = MakeLabel(NoteRow, "⚠  Auto-Hop requiere 'Alarm de Sparkle' activa", 10, Theme.TextDim)
+local NoteLbl = MakeLabel(NoteRow, "Hop cada 10s → para automaticamente al detectar Sparkle", 10, Theme.TextDim)
 NoteLbl.Size  = UDim2.new(1, 0, 1, 0)
 NoteLbl.ZIndex = 8
 

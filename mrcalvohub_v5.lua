@@ -44,14 +44,14 @@ local States = {
 
 -- =========================================================
 -- SERVIDOR PRIVADO
--- Link: https://www.roblox.com/share?code=8148aea3c1a9584fa12362fedd75303b&type=Server
+-- Link: https://www.roblox.com/share?code=98ccafc4553b6346963b1c1c4e093075&type=Server
 -- El code del link es el ReservedServerAccessCode.
 -- La API de Roblox permite obtener el JobId del servidor privado
 -- via: https://games.roblox.com/v1/games/{placeId}/servers/Reserved?limit=100
 -- Luego usamos TeleportToPlaceInstance con ese JobId (igual que el
 -- serverHop publico pero apuntando al servidor privado).
 -- =========================================================
-local RESERVED_ACCESS_CODE = "8148aea3c1a9584fa12362fedd75303b"
+local RESERVED_ACCESS_CODE = "98ccafc4553b6346963b1c1c4e093075"
 local PLACE_ID              = game.PlaceId
 
 -- =========================================================

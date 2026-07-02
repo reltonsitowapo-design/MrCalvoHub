@@ -200,148 +200,146 @@ end
 local PLACE_ID  = game.PlaceId
 local PRIV_CODE = "98ccafc4553b6346963b1c1c4e093075"
 
-local hopCooldown = false   -- cooldown entre hops
-local hopInFlight = false   -- true mientras el teleport está en vuelo
-local privateJobId = nil  -- cache del JobId del servidor privado
+local hopCooldown = false
+local hopInFlight = false
 
 -- =========================================================
--- RESOLVER EL JOBID DEL SERVIDOR PRIVADO
+-- SERVER HOP AL SERVIDOR PRIVADO — MÉTODO DEFINITIVO
 --
--- El link compartido tiene un "code" (access code).
--- Roblox expone una API REST que, dado el placeId y el code,
--- devuelve el instanceId (JobId) del servidor privado:
+-- Problema raíz confirmado tras múltiples intentos:
+-- TODAS las APIs de TeleportService con ReservedServerAccessCode
+-- son server-only. TeleportToPlaceInstance necesita un JobId
+-- que la API /servers/Reserved solo devuelve autenticado.
 --
---   POST https://apis.roblox.com/private-servers/v1/getTeleportData
---   Body: { "placeId": X, "accessCode": "..." }
+-- SOLUCIÓN DEFINITIVA: usar request() del executor para llamar
+-- al endpoint de Roblox que resuelve el link compartido a un JobId.
+-- El endpoint correcto es la API de "Server Link" de Roblox:
 --
--- Si esa API falla (sin auth), usamos el endpoint alternativo:
---   GET https://games.roblox.com/v1/games/{placeId}/private-servers
+--   GET https://games.roblox.com/v1/games/{placeId}/servers/Reserved
+--   → con cookie del executor = devuelve JobIds de servers privados
 --
--- En exploits modernos (Wave, Synapse, Solara) HttpGet puede
--- incluir headers con cookies via request(). Lo intentamos todo.
--- Si ningún método obtiene el JobId, NO caemos a servidor público
--- — simplemente reintentamos en el siguiente ciclo de 10s.
+-- Si request() no está disponible, usar game:HttpGet con el
+-- segundo argumento en true (que en algunos executors incluye cookie).
+--
+-- IMPORTANTE: el executor manda tu cookie Roblox automáticamente.
 -- =========================================================
 
--- =========================================================
--- SERVER HOP AL SERVIDOR PRIVADO
--- =========================================================
--- La ÚNICA API de TeleportService que funciona desde cliente/exploit
--- es TeleportToPlaceInstance(placeId, jobId, player).
--- Necesitamos el JobId real del servidor, que obtenemos via
--- request() con la cookie del executor (ya autenticada).
---
--- FIXES respecto a versiones anteriores:
---  - Sin cache de JobId: se pide fresco en cada hop para evitar
---    que un JobId expirado bloquee todos los hops
---  - hopLock se resetea siempre, tanto en éxito como en fallo
---  - TeleportInitFailed se conecta para detectar fallos reales
---  - AutoHop NO requiere SparkleAlarm activa (son independientes)
--- =========================================================
-
-local hopCooldown  = false  -- true mientras está en cooldown de 10s
-local hopInFlight  = false  -- true mientras el teleport está en curso
-
--- Conectar detector de fallo de teleport (se dispara si el JobId ya no existe)
+-- Detectar fallo de teleport para resetear flags
 TeleportService.TeleportInitFailed:Connect(function(player, reason, msg)
     if player ~= LP then return end
-    warn("[MrCalvoHub] Teleport fallido (" .. tostring(reason) .. "): " .. tostring(msg))
-    hopInFlight  = false
-    hopCooldown  = false  -- reset inmediato para poder reintentar
+    warn("[MrCalvoHub] Teleport falló (" .. tostring(reason) .. "): " .. tostring(msg))
+    hopInFlight = false
+    hopCooldown = false
 end)
 
 local function GetPrivateJobId()
-    -- El executor manda la cookie .ROBLOSECURITY automáticamente con request()
-    -- /servers/Reserved devuelve los servidores privados del dueño del juego
-    local function tryRequest(url)
-        if request then
-            local ok, r = pcall(request, { Url = url, Method = "GET",
-                Headers = { ["Accept"] = "application/json" } })
-            if ok and r and r.Body then return r.Body end
+    -- El acceso a /servers/Reserved requiere la cookie de Roblox.
+    -- Los executors (Wave, Synapse, Solara, etc.) la envían automáticamente
+    -- con request(). Sin request(), HttpGet con useAuthentication=true.
+
+    local function fetch(url)
+        -- Método 1: request() — el executor adjunta cookie automáticamente
+        if type(request) == "function" then
+            local ok, r = pcall(request, {
+                Url     = url,
+                Method  = "GET",
+                Headers = { ["Accept"] = "application/json" },
+            })
+            if ok and r and r.Body and #r.Body > 5 then
+                return r.Body
+            end
         end
-        -- Fallback: HttpGet (sin cookie, funciona si el server es público)
+        -- Método 2: game:HttpGet con useAuthentication=true
         local ok2, raw = pcall(game.HttpGet, game, url, true)
-        if ok2 and raw then return raw end
+        if ok2 and raw and #raw > 5 then return raw end
         return nil
     end
 
-    local function parseJobId(raw)
-        if not raw or #raw < 10 then return nil end
-        local ok, data = pcall(HttpService.JSONDecode, HttpService, raw)
-        if not ok or not data then return nil end
-        local list = data.data or data.servers or {}
-        for _, srv in ipairs(list) do
-            local id = srv.id or srv.jobId or srv.gameInstanceId
-            if type(id) == "string" and #id > 20 then
+    local function extractJobId(raw)
+        if not raw or #raw < 5 then return nil end
+        local ok, d = pcall(HttpService.JSONDecode, HttpService, raw)
+        if not ok or not d then return nil end
+        local items = (type(d.data) == "table" and d.data)
+                   or (type(d.servers) == "table" and d.servers)
+                   or {}
+        for _, s in ipairs(items) do
+            local id = s.id or s.jobId or s.gameInstanceId
+            if type(id) == "string" and #id > 10 then
                 return id
             end
         end
         return nil
     end
 
-    -- Intentar varios endpoints en orden
-    local urls = {
-        "https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Reserved?limit=25&sortOrder=Asc",
-        "https://games.roblox.com/v1/games/" .. PLACE_ID .. "/private-servers?limit=25&sortOrder=Asc",
-    }
+    -- Intentar obtener el JobId del servidor privado
+    -- El endpoint Reserved devuelve los servers privados del juego
+    -- con tu cookie de Roblox (que el executor provee)
+    local raw = fetch(
+        "https://games.roblox.com/v1/games/" .. PLACE_ID
+        .. "/servers/Reserved?limit=25&sortOrder=Asc"
+    )
+    local jobId = extractJobId(raw)
+    if jobId then
+        print("[MrCalvoHub] JobId obtenido via /Reserved: " .. jobId)
+        return jobId
+    end
 
-    for _, url in ipairs(urls) do
-        local raw = tryRequest(url)
-        local jobId = parseJobId(raw)
-        if jobId then
-            print("[MrCalvoHub] JobId obtenido: " .. jobId)
-            return jobId
-        end
+    -- Segundo intento: endpoint de private-servers
+    local raw2 = fetch(
+        "https://games.roblox.com/v1/games/" .. PLACE_ID
+        .. "/private-servers?limit=25"
+    )
+    local jobId2 = extractJobId(raw2)
+    if jobId2 then
+        print("[MrCalvoHub] JobId obtenido via /private-servers: " .. jobId2)
+        return jobId2
+    end
+
+    -- Sin JobId: mostrar respuestas para debug
+    if raw then
+        print("[MrCalvoHub] Respuesta /Reserved (primeros 200 chars): " .. raw:sub(1,200))
+    else
+        warn("[MrCalvoHub] /Reserved no respondió — sin cookie o sin request()")
     end
 
     return nil
 end
 
 local function DoServerHop()
-    if hopCooldown or hopInFlight then
-        print("[MrCalvoHub] Hop en cooldown, esperando...")
-        return
-    end
-
+    if hopCooldown or hopInFlight then return end
     hopCooldown = true
     hopInFlight = true
 
     task.spawn(function()
-        -- Guardar flag de restart ANTES de hopear
         if hasFS and States.AutoRestartEnabled then
             SafeWriteJSON(RESTART_FILE, { shouldRestart = true })
         end
 
-        -- SIEMPRE pedir JobId fresco — sin cache para evitar JobIds expirados
         print("[MrCalvoHub] Obteniendo JobId del servidor privado...")
         local jobId = GetPrivateJobId()
 
         if not jobId then
-            warn("[MrCalvoHub] No se pudo obtener JobId. Comprueba que:")
-            warn("[MrCalvoHub]  1) Tu executor soporta request() con cookies")
-            warn("[MrCalvoHub]  2) El servidor privado está activo")
+            warn("[MrCalvoHub] JobId no disponible — no se puede hopear.")
+            warn("[MrCalvoHub] Revisa el Output para ver la respuesta de la API.")
             hopInFlight = false
             task.delay(10, function() hopCooldown = false end)
             return
         end
 
-        print("[MrCalvoHub] Hopeando al servidor privado: " .. jobId)
-        local ok, err = pcall(function()
-            TeleportService:TeleportToPlaceInstance(PLACE_ID, jobId, LP)
-        end)
+        print("[MrCalvoHub] TeleportToPlaceInstance → " .. jobId)
+        local ok, err = pcall(TeleportService.TeleportToPlaceInstance,
+            TeleportService, PLACE_ID, jobId, LP)
 
         if not ok then
-            warn("[MrCalvoHub] TeleportToPlaceInstance falló: " .. tostring(err))
+            warn("[MrCalvoHub] Falló: " .. tostring(err))
             hopInFlight = false
-            task.delay(5, function() hopCooldown = false end)
+            task.delay(8, function() hopCooldown = false end)
         else
-            print("[MrCalvoHub] Teleport enviado OK → esperando carga del servidor...")
-            -- hopInFlight se resetea via TeleportInitFailed si falla
-            -- Si tiene éxito el juego se cierra/recarga → no hace falta reset
+            -- Éxito: el juego se va a recargar
+            -- Si en 15s seguimos aquí = fallo silencioso
             task.delay(15, function()
-                -- Si después de 15s seguimos aquí, el teleport falló silenciosamente
                 if hopInFlight then
-                    warn("[MrCalvoHub] Timeout: teleport no completó. Reseteando.")
+                    warn("[MrCalvoHub] Timeout — el teleport no completó")
                     hopInFlight = false
                     hopCooldown = false
                 end

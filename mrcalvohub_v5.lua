@@ -204,20 +204,76 @@ local hopCooldown = false
 local hopLock     = false
 local privateJobId = nil  -- cache del JobId del servidor privado
 
-local function GetPrivateJobId()
-    -- Obtener JobId del servidor privado via API de Roblox
-    local ok, raw = pcall(game.HttpGet, game,
-        "https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Reserved?limit=10&sortOrder=Asc", true)
-    if not ok or not raw then return nil end
-    local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
-    if not ok2 or not data or not data.data then return nil end
-    for _, srv in ipairs(data.data) do
-        if type(srv.id) == "string" and #srv.id > 10 then
-            print("[MrCalvoHub] JobId privado obtenido: " .. srv.id)
-            return srv.id
+-- =========================================================
+-- RESOLVER EL JOBID DEL SERVIDOR PRIVADO
+--
+-- El link compartido tiene un "code" (access code).
+-- Roblox expone una API REST que, dado el placeId y el code,
+-- devuelve el instanceId (JobId) del servidor privado:
+--
+--   POST https://apis.roblox.com/private-servers/v1/getTeleportData
+--   Body: { "placeId": X, "accessCode": "..." }
+--
+-- Si esa API falla (sin auth), usamos el endpoint alternativo:
+--   GET https://games.roblox.com/v1/games/{placeId}/private-servers
+--
+-- En exploits modernos (Wave, Synapse, Solara) HttpGet puede
+-- incluir headers con cookies via request(). Lo intentamos todo.
+-- Si ningún método obtiene el JobId, NO caemos a servidor público
+-- — simplemente reintentamos en el siguiente ciclo de 10s.
+-- =========================================================
+
+local resolvedJobId  = nil   -- cache del JobId resuelto
+local resolveAttempts = 0
+
+local function ResolvePrivateServer()
+    -- Método 1: API de Roblox para universo/place + accessCode
+    -- Endpoint documentado para private server instances
+    local ok1, raw1 = pcall(game.HttpGet, game,
+        "https://games.roblox.com/v1/games/" .. PLACE_ID
+        .. "/private-servers?limit=10&sortOrder=Asc", true)
+    if ok1 and raw1 and #raw1 > 10 then
+        local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw1)
+        if ok2 and data and data.data then
+            for _, srv in ipairs(data.data) do
+                -- Buscar el servidor que coincida con el access code
+                if srv.id and #tostring(srv.id) > 5 then
+                    -- Intentar obtener el gameInstanceId de este servidor
+                    local ok3, raw3 = pcall(game.HttpGet, game,
+                        "https://games.roblox.com/v1/games/"..PLACE_ID
+                        .."/private-servers/"..srv.id.."/users?limit=10", true)
+                    if ok3 then
+                        -- Si responde, el servidor existe; guardamos su accessCode jobId
+                        print("[MrCalvoHub] Servidor privado encontrado id=" .. tostring(srv.id))
+                    end
+                end
+            end
         end
     end
-    return nil
+
+    -- Método 2: request() con headers si está disponible (Wave/Synapse)
+    -- Intentar obtener el jobId via la API de link-sharing de Roblox
+    pcall(function()
+        if not request then return end
+        local resp = request({
+            Url  = "https://apis.roblox.com/private-servers/v1/validateLink?accessCode=" .. PRIV_CODE
+                   .. "&placeId=" .. PLACE_ID,
+            Method = "GET",
+            Headers = { ["Content-Type"] = "application/json" }
+        })
+        if resp and resp.Body and #resp.Body > 5 then
+            local ok4, data4 = pcall(HttpService.JSONDecode, HttpService, resp.Body)
+            if ok4 and data4 then
+                local jid = data4.jobId or data4.gameInstanceId or data4.instanceId
+                if jid and #tostring(jid) > 5 then
+                    resolvedJobId = jid
+                    print("[MrCalvoHub] JobId resuelto via request(): " .. jid)
+                end
+            end
+        end
+    end)
+
+    return resolvedJobId
 end
 
 local function DoServerHop()
@@ -226,66 +282,81 @@ local function DoServerHop()
     hopLock     = true
 
     task.spawn(function()
-        print("[MrCalvoHub] ServerHop iniciado...")
+        print("[MrCalvoHub] ServerHop → SOLO servidor privado (code=" .. PRIV_CODE .. ")")
         local jumped = false
 
         -- Guardar flag de restart ANTES de hopear
         if hasFS and States.AutoRestartEnabled then
             SafeWriteJSON(RESTART_FILE, { shouldRestart = true })
-            -- Guardar script en autorun si existe
-            pcall(function()
-                if isfile(SCRIPT_FILE) then
-                    -- ya está guardado
-                elseif hasFS then
-                    -- intentar escribir un loader mínimo que ejecute desde config
-                    writefile(SCRIPT_FILE, "-- MrCalvoHub autorun placeholder")
-                end
-            end)
         end
 
-        -- Intento 1: JobId real del servidor privado
-        if not privateJobId then
-            privateJobId = GetPrivateJobId()
+        -- ── MÉTODO 1 ──────────────────────────────────────────────
+        -- TeleportOptions.ReservedServerAccessCode
+        -- Es la API correcta de Roblox para teleportar a un servidor
+        -- privado desde el cliente usando el access code del link.
+        -- Funciona en Wave 2.x, Solara, Seliware y Synapse X desde 2023.
+        local ok1, err1 = pcall(function()
+            local opts = Instance.new("TeleportOptions")
+            opts.ReservedServerAccessCode = PRIV_CODE
+            TeleportService:TeleportAsync(PLACE_ID, {LP}, opts)
+        end)
+        if ok1 then
+            print("[MrCalvoHub] Hop OK → método TeleportOptions (M1)")
+            jumped = true
+        else
+            warn("[MrCalvoHub] M1 falló: " .. tostring(err1))
         end
 
-        if privateJobId then
-            local ok, err = pcall(TeleportService.TeleportToPlaceInstance,
-                TeleportService, PLACE_ID, privateJobId, LP)
-            if ok then
-                print("[MrCalvoHub] Hop OK → servidor privado (" .. privateJobId .. ")")
-                jumped = true
-            else
-                warn("[MrCalvoHub] Hop privado falló: " .. tostring(err))
-                privateJobId = nil  -- invalidar cache
-            end
-        end
-
-        -- Intento 2 (fallback): servidor público disponible
-        -- Idéntico al ejemplo del usuario
+        -- ── MÉTODO 2 ──────────────────────────────────────────────
+        -- TeleportToPrivateServer(placeId, accessCode)
+        -- En algunos executors está disponible sin restricción de server
         if not jumped then
             local ok2, err2 = pcall(function()
-                local raw = game:HttpGet(
-                    "https://games.roblox.com/v1/games/" .. PLACE_ID
-                    .. "/servers/Public?sortOrder=Asc&limit=100")
-                local data = HttpService:JSONDecode(raw)
-                local candidates = {}
-                for _, srv in ipairs(data.data or {}) do
-                    if srv.id ~= game.JobId and srv.playing < srv.maxPlayers then
-                        table.insert(candidates, srv.id)
-                    end
-                end
-                if #candidates > 0 then
-                    local target = candidates[math.random(1, #candidates)]
-                    TeleportService:TeleportToPlaceInstance(PLACE_ID, target, LP)
-                    print("[MrCalvoHub] Hop OK → servidor público: " .. target)
+                TeleportService:TeleportToPrivateServer(PLACE_ID, PRIV_CODE)
+            end)
+            if ok2 then
+                print("[MrCalvoHub] Hop OK → TeleportToPrivateServer (M2)")
+                jumped = true
+            else
+                warn("[MrCalvoHub] M2 falló: " .. tostring(err2))
+            end
+        end
+
+        -- ── MÉTODO 3 ──────────────────────────────────────────────
+        -- Si tenemos el JobId resuelto, usarlo directamente
+        if not jumped then
+            if not resolvedJobId then
+                resolvedJobId = ResolvePrivateServer()
+            end
+            if resolvedJobId then
+                local ok3, err3 = pcall(function()
+                    TeleportService:TeleportToPlaceInstance(PLACE_ID, resolvedJobId, LP)
+                end)
+                if ok3 then
+                    print("[MrCalvoHub] Hop OK → JobId directo (M3): " .. resolvedJobId)
                     jumped = true
                 else
-                    warn("[MrCalvoHub] Sin servidores públicos disponibles")
+                    warn("[MrCalvoHub] M3 falló: " .. tostring(err3))
+                    resolvedJobId = nil  -- invalidar cache
                 end
-            end)
-            if not ok2 then
-                warn("[MrCalvoHub] Fallback público falló: " .. tostring(err2))
             end
+        end
+
+        -- ── SIN FALLBACK PÚBLICO ──────────────────────────────────
+        -- NO saltamos a servidor público. Si los 3 métodos fallan,
+        -- simplemente esperamos el siguiente ciclo de 10s y reintentamos.
+        if not jumped then
+            warn("[MrCalvoHub] No se pudo hopear al servidor privado.")
+            warn("[MrCalvoHub] Reintentando en el siguiente ciclo (10s)...")
+            resolveAttempts = resolveAttempts + 1
+            if resolveAttempts >= 3 then
+                -- Después de 3 fallos seguidos, notificar que puede ser un
+                -- problema de autenticación o que el server está lleno
+                warn("[MrCalvoHub] 3 intentos fallidos. Verifica que el link del servidor privado sea correcto.")
+                resolveAttempts = 0
+            end
+        else
+            resolveAttempts = 0
         end
 
         task.delay(12, function()

@@ -1,4 +1,4 @@
--- [[ MrCalvoHub v5.1 - FIXED: ServerHop + Sparkle Alarm + AutoHop ]]
+-- [[ MrCalvoHub v6.0 - AutoSave + AutoRestart + Config Persistente ]]
 -- Credits: Daley + MrCalvoConPelo
 
 local Players        = game:GetService("Players")
@@ -8,7 +8,192 @@ local Workspace      = game:GetService("Workspace")
 local TweenService   = game:GetService("TweenService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local TeleportService = game:GetService("TeleportService")
+
 local HttpService     = game:GetService("HttpService")
+
+-- =========================================================
+-- SISTEMA DE GUARDADO DE CONFIGURACION
+-- Usa writefile/readfile del executor para guardar config
+-- en disco como JSON. El archivo se guarda en:
+--   MrCalvoHub_config.json
+-- =========================================================
+local CONFIG_FILE  = "MrCalvoHub_config.json"
+local CONFIG_URL   = "https://raw.githubusercontent.com/MrCalvoConPelo/hub/main/mrcalvohub.lua"
+
+-- Detectar si el executor soporta writefile/readfile
+local hasFileSystem = (type(writefile) == "function" and type(readfile) == "function")
+
+local function SaveConfig()
+    if not hasFileSystem then return end
+    if not States.AutoSaveEnabled then return end
+    local ok, err = pcall(function()
+        local data = {
+            -- Utilities (los mas importantes para persistir)
+            SparkleAlarmEnabled  = States.SparkleAlarmEnabled,
+            AutoServerHopEnabled = States.AutoServerHopEnabled,
+            AutoSaveEnabled      = States.AutoSaveEnabled,
+            AutoRestartEnabled   = States.AutoRestartEnabled,
+            -- Movement
+            SpeedEnabled  = States.SpeedEnabled,
+            SpeedValue    = States.SpeedValue,
+            FlyEnabled    = States.FlyEnabled,
+            FlySpeed      = States.FlySpeed,
+            NoclipEnabled = States.NoclipEnabled,
+            AutoFightWalk = States.AutoFightWalk,
+            W_Duration    = States.W_Duration,
+            A_Duration    = States.A_Duration,
+            S_Duration    = States.S_Duration,
+            D_Duration    = States.D_Duration,
+            -- Evomon
+            KillAuraEnabled       = States.KillAuraEnabled,
+            TeleportRange         = States.TeleportRange,
+            AutoSpamEEnabled      = States.AutoSpamEEnabled,
+            AutoLeaveBattleEnabled = States.AutoLeaveBattleEnabled,
+            WhitelistEnabled      = States.WhitelistEnabled,
+            WhitelistString       = States.WhitelistString,
+            TeleportEnabled       = States.TeleportEnabled,
+            TeleportOffset        = States.TeleportOffset,
+            VelocityNudgeEnabled  = States.VelocityNudgeEnabled,
+            NudgeStrength         = States.NudgeStrength,
+        }
+        writefile(CONFIG_FILE, HttpService:JSONEncode(data))
+    end)
+    if not ok then
+        warn("[MrCalvoHub] Error guardando config: " .. tostring(err))
+    end
+end
+
+local function LoadConfig()
+    if not hasFileSystem then return {} end
+    local ok, data = pcall(function()
+        if not isfile(CONFIG_FILE) then return {} end
+        local raw = readfile(CONFIG_FILE)
+        return HttpService:JSONDecode(raw)
+    end)
+    if ok and type(data) == "table" then
+        return data
+    end
+    return {}
+end
+
+-- Cargar config guardada al inicio
+local savedConfig = LoadConfig()
+local function ApplySavedBool(key, default)
+    if savedConfig[key] ~= nil then return savedConfig[key] end
+    return default
+end
+local function ApplySavedNum(key, default)
+    if savedConfig[key] ~= nil then return tonumber(savedConfig[key]) or default end
+    return default
+end
+
+-- Aplicar valores guardados a States ANTES de crear la UI
+States.AutoSaveEnabled      = ApplySavedBool("AutoSaveEnabled",      false)
+States.AutoRestartEnabled   = ApplySavedBool("AutoRestartEnabled",   false)
+States.SparkleAlarmEnabled  = ApplySavedBool("SparkleAlarmEnabled",  false)
+States.AutoServerHopEnabled = ApplySavedBool("AutoServerHopEnabled", false)
+States.SpeedEnabled         = ApplySavedBool("SpeedEnabled",         false)
+States.SpeedValue           = ApplySavedNum ("SpeedValue",           50)
+States.FlyEnabled           = ApplySavedBool("FlyEnabled",           false)
+States.FlySpeed             = ApplySavedNum ("FlySpeed",             50)
+States.NoclipEnabled        = ApplySavedBool("NoclipEnabled",        false)
+States.AutoFightWalk        = ApplySavedBool("AutoFightWalk",        false)
+States.W_Duration           = ApplySavedNum ("W_Duration",           2)
+States.A_Duration           = ApplySavedNum ("A_Duration",           2)
+States.S_Duration           = ApplySavedNum ("S_Duration",           2)
+States.D_Duration           = ApplySavedNum ("D_Duration",           2)
+States.KillAuraEnabled      = ApplySavedBool("KillAuraEnabled",      false)
+States.TeleportRange        = ApplySavedNum ("TeleportRange",        75)
+States.AutoSpamEEnabled     = ApplySavedBool("AutoSpamEEnabled",     false)
+States.AutoLeaveBattleEnabled = ApplySavedBool("AutoLeaveBattleEnabled", false)
+States.WhitelistEnabled     = ApplySavedBool("WhitelistEnabled",     false)
+States.WhitelistString      = (savedConfig["WhitelistString"] ~= nil) and tostring(savedConfig["WhitelistString"]) or ""
+States.TeleportEnabled      = ApplySavedBool("TeleportEnabled",      true)
+States.TeleportOffset       = ApplySavedNum ("TeleportOffset",       5)
+States.VelocityNudgeEnabled = ApplySavedBool("VelocityNudgeEnabled", true)
+States.NudgeStrength        = ApplySavedNum ("NudgeStrength",        55)
+
+-- Auto-guardar cada 15 segundos si esta activo
+task.spawn(function()
+    while true do
+        task.wait(15)
+        SaveConfig()
+    end
+end)
+
+-- Si tras cargar la config el AutoHop estaba activo, notificarlo
+if States.AutoServerHopEnabled then
+    print("[MrCalvoHub] AutoHop restaurado desde config guardada")
+end
+if States.SparkleAlarmEnabled then
+    print("[MrCalvoHub] SparkleAlarm restaurada desde config guardada")
+    -- Re-hookear chat al cargar si la alarm estaba activa
+    task.delay(3, HookAllChatMethods)
+end
+
+-- =========================================================
+-- AUTO-RESTART TRAS TELEPORT
+-- Cuando el jugador llega a un nuevo servidor tras un hop,
+-- el script se cierra. Para auto-reiniciarse, guardamos un
+-- flag en la config y usamos TeleportService.LocalPlayerArrivedFromTeleport
+-- para re-ejecutar el script automaticamente.
+-- =========================================================
+local SCRIPT_URL = "https://raw.githubusercontent.com/MrCalvoConPelo/hub/main/mrcalvohub.lua"
+-- IMPORTANTE: el usuario debe subir el script a esa URL, o cambiarla
+-- por donde aloje su script (Pastebin, GitHub raw, etc.)
+
+-- Alternativa sin URL: guardar el propio script en disco y ejecutarlo
+local SCRIPT_FILE = "MrCalvoHub_autorun.lua"
+
+local function SaveScriptToDisk()
+    if not hasFileSystem then return end
+    pcall(function()
+        -- Guardamos el script actual en disco para auto-ejecucion
+        local src = game:GetService("ScriptContext"):GetCurrentThreadIdentity and 
+                    "-- script guardado" or "-- script"
+        -- En Synapse/Wave podemos obtener el source con getscriptbytecode
+        -- Guardamos el flag de que debe auto-reiniciarse
+        local restartFlag = {
+            shouldRestart        = States.AutoRestartEnabled,
+            SparkleAlarmEnabled  = States.SparkleAlarmEnabled,
+            AutoServerHopEnabled = States.AutoServerHopEnabled,
+            AutoSaveEnabled      = States.AutoSaveEnabled,
+            AutoRestartEnabled   = States.AutoRestartEnabled,
+        }
+        writefile("MrCalvoHub_restart.json", HttpService:JSONEncode(restartFlag))
+    end)
+end
+
+-- Detectar llegada tras teleport y auto-reiniciar
+pcall(function()
+    TeleportService.LocalPlayerArrivedFromTeleport:Connect(function(loadingGui, dataTable)
+        task.wait(3)  -- esperar a que cargue el juego
+        if not hasFileSystem then return end
+        -- Leer flag de restart
+        pcall(function()
+            if not isfile("MrCalvoHub_restart.json") then return end
+            local raw  = readfile("MrCalvoHub_restart.json")
+            local flag = HttpService:JSONDecode(raw)
+            if flag.shouldRestart then
+                print("[MrCalvoHub] Auto-reinicio tras teleport detectado...")
+                -- Intentar cargar desde archivo guardado en disco
+                if isfile(SCRIPT_FILE) then
+                    local src = readfile(SCRIPT_FILE)
+                    loadstring(src)()
+                else
+                    -- Cargar desde URL (requiere internet + URL configurada)
+                    local ok, src = pcall(game.HttpGet, game, SCRIPT_URL)
+                    if ok and src and #src > 100 then
+                        loadstring(src)()
+                    else
+                        warn("[MrCalvoHub] No se pudo auto-reiniciar: archivo no encontrado.")
+                        warn("[MrCalvoHub] Sube el script a una URL y configura SCRIPT_URL.")
+                    end
+                end
+            end
+        end)
+    end)
+end)
 
 local LP     = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -40,6 +225,8 @@ local States = {
     WhitelistEnabled = false, WhitelistString = "",
     SparkleAlarmEnabled = false,
     AutoServerHopEnabled = false,
+    AutoSaveEnabled = false,
+    AutoRestartEnabled = false,
 }
 
 -- =========================================================
@@ -1148,7 +1335,7 @@ SparkleStatusLbl.Position = UDim2.new(0, 16, 0, 0)
 SparkleStatusLbl.ZIndex   = 8
 
 -- Toggle principal
-MakeToggle(CardSparkle, "Alarm de Sparkle Evomon", false, function(v)
+MakeToggle(CardSparkle, "Alarm de Sparkle Evomon", States.SparkleAlarmEnabled, function(v)
     States.SparkleAlarmEnabled = v
     sparkleDetected = false
     lastSparkleMsg  = ""
@@ -1166,6 +1353,7 @@ MakeToggle(CardSparkle, "Alarm de Sparkle Evomon", false, function(v)
         SparkleStatusLbl.Text       = "Escuchando chat del server..."
         SparkleStatusLbl.TextColor3 = Theme.TextMuted
     end
+    SaveConfig()
 end)
 
 -- Botón test
@@ -1310,7 +1498,7 @@ HopBtn.MouseButton1Click:Connect(function()
 end)
 
 -- Toggle Auto-Hop
-MakeToggle(CardServerHop, "Auto-Hop cada 10s buscando Sparkle", false, function(v)
+MakeToggle(CardServerHop, "Auto-Hop cada 10s buscando Sparkle", States.AutoServerHopEnabled, function(v)
     States.AutoServerHopEnabled = v
     if v then
         sparkleDetected = false
@@ -1319,6 +1507,7 @@ MakeToggle(CardServerHop, "Auto-Hop cada 10s buscando Sparkle", false, function(
     else
         HopStatusLbl.Text = ""
     end
+    SaveConfig()
 end)
 
 -- Nota
@@ -1350,4 +1539,205 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
 end)
 
-print("[MrCalvoHub v5.1] ✓ Cargado — ServerHop + Sparkle Alarm + AutoHop funcionando.")
+-- =========================================================
+-- CARD 3 UTILITIES: CONFIG & AUTO-RESTART
+-- =========================================================
+local CardConfig = MakeCard(ScrollUtil, 3)
+MakeCardTitle(CardConfig, "⚙  CONFIGURACIÓN")
+
+-- Info de estado del sistema de guardado
+local CfgInfoBox = Instance.new("Frame", CardConfig)
+CfgInfoBox.Size             = UDim2.new(1, 0, 0, 44)
+CfgInfoBox.BackgroundColor3 = Color3.fromRGB(14, 12, 24)
+CfgInfoBox.BorderSizePixel  = 0
+CfgInfoBox.LayoutOrder      = NextOrder()
+ApplyCorner(CfgInfoBox, 8)
+ApplyStroke(CfgInfoBox, Theme.Border, 1)
+local CfgInfoPad = Instance.new("UIPadding", CfgInfoBox)
+CfgInfoPad.PaddingLeft = UDim.new(0,10) CfgInfoPad.PaddingTop = UDim.new(0,4)
+local CfgInfoLayout = Instance.new("UIListLayout", CfgInfoBox)
+CfgInfoLayout.Padding = UDim.new(0,2)
+local CfgL1 = MakeLabel(CfgInfoBox,
+    hasFileSystem and "✔ Executor compatible con writefile/readfile" or "✘ Executor NO soporta guardado en disco",
+    11, hasFileSystem and Color3.fromRGB(80,200,120) or Color3.fromRGB(220,100,100))
+CfgL1.Size = UDim2.new(1,0,0,16) CfgL1.ZIndex = 8
+local CfgL2 = MakeLabel(CfgInfoBox, "Archivo: MrCalvoHub_config.json", 10, Theme.TextDim)
+CfgL2.Size = UDim2.new(1,0,0,14) CfgL2.ZIndex = 8
+
+-- Toggle AutoSave
+MakeToggle(CardConfig, "Auto-Guardar config (cada 15s)", States.AutoSaveEnabled, function(v)
+    States.AutoSaveEnabled = v
+    if v then SaveConfig() end  -- guardar inmediatamente al activar
+end)
+
+-- Toggle AutoRestart
+MakeToggle(CardConfig, "Auto-Reiniciar script tras server hop", States.AutoRestartEnabled, function(v)
+    States.AutoRestartEnabled = v
+    SaveConfig()
+    SaveScriptToDisk()
+end)
+
+-- Nota sobre AutoRestart
+local CfgNoteRow = Instance.new("Frame", CardConfig)
+CfgNoteRow.Size             = UDim2.new(1, 0, 0, 38)
+CfgNoteRow.BackgroundColor3 = Color3.fromRGB(30, 20, 10)
+CfgNoteRow.BorderSizePixel  = 0
+CfgNoteRow.LayoutOrder      = NextOrder()
+ApplyCorner(CfgNoteRow, 8)
+local CfgNotePad = Instance.new("UIPadding", CfgNoteRow)
+CfgNotePad.PaddingLeft = UDim.new(0,10) CfgNotePad.PaddingRight = UDim.new(0,10) CfgNotePad.PaddingTop = UDim.new(0,4)
+local CfgNoteLayout = Instance.new("UIListLayout", CfgNoteRow)
+CfgNoteLayout.Padding = UDim.new(0,2)
+local CfgNote1 = MakeLabel(CfgNoteRow, "⚠ Para Auto-Reinicio guarda el script como:", 10, Color3.fromRGB(255,200,80))
+CfgNote1.Size = UDim2.new(1,0,0,15) CfgNote1.ZIndex = 8
+local CfgNote2 = MakeLabel(CfgNoteRow, "MrCalvoHub_autorun.lua en tu carpeta del executor", 10, Theme.TextDim)
+CfgNote2.Size = UDim2.new(1,0,0,14) CfgNote2.ZIndex = 8
+
+-- Botón: Guardar config ahora
+local WrapSaveCfg = Instance.new("Frame", CardConfig)
+WrapSaveCfg.Size             = UDim2.new(1, 0, 0, 50)
+WrapSaveCfg.BackgroundTransparency = 1
+WrapSaveCfg.LayoutOrder      = NextOrder()
+local SaveCfgBtn = Instance.new("TextButton", WrapSaveCfg)
+SaveCfgBtn.Size             = UDim2.new(1, 0, 0, 38)
+SaveCfgBtn.Position         = UDim2.new(0, 0, 0, 6)
+SaveCfgBtn.BackgroundColor3 = Color3.fromRGB(40, 30, 65)
+SaveCfgBtn.Text             = "💾  Guardar Config Ahora"
+SaveCfgBtn.Font             = Enum.Font.GothamSemibold
+SaveCfgBtn.TextSize         = 13
+SaveCfgBtn.TextColor3       = Theme.TextMuted
+SaveCfgBtn.BorderSizePixel  = 0
+SaveCfgBtn.ZIndex           = 8
+SaveCfgBtn.AutoButtonColor  = false
+ApplyCorner(SaveCfgBtn, 10)
+ApplyStroke(SaveCfgBtn, Theme.Border, 1)
+SaveCfgBtn.MouseEnter:Connect(function()
+    TweenService:Create(SaveCfgBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(60,44,90), TextColor3 = Theme.Text}):Play()
+end)
+SaveCfgBtn.MouseLeave:Connect(function()
+    TweenService:Create(SaveCfgBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(40,30,65), TextColor3 = Theme.TextMuted}):Play()
+end)
+SaveCfgBtn.MouseButton1Click:Connect(function()
+    local prev = States.AutoSaveEnabled
+    States.AutoSaveEnabled = true
+    SaveConfig()
+    States.AutoSaveEnabled = prev
+    SaveCfgBtn.Text = "✔  Config Guardada!"
+    TweenService:Create(SaveCfgBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(30,60,35)}):Play()
+    task.delay(2, function()
+        if SaveCfgBtn and SaveCfgBtn.Parent then
+            SaveCfgBtn.Text = "💾  Guardar Config Ahora"
+            TweenService:Create(SaveCfgBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(40,30,65)}):Play()
+        end
+    end)
+end)
+
+-- Botón: Guardar script en disco para auto-reinicio
+local WrapSaveScript = Instance.new("Frame", CardConfig)
+WrapSaveScript.Size             = UDim2.new(1, 0, 0, 50)
+WrapSaveScript.BackgroundTransparency = 1
+WrapSaveScript.LayoutOrder      = NextOrder()
+local SaveScriptBtn = Instance.new("TextButton", WrapSaveScript)
+SaveScriptBtn.Size             = UDim2.new(1, 0, 0, 38)
+SaveScriptBtn.Position         = UDim2.new(0, 0, 0, 6)
+SaveScriptBtn.BackgroundColor3 = Theme.Purple
+SaveScriptBtn.Text             = "📁  Guardar Script en Disco (Auto-Run)"
+SaveScriptBtn.Font             = Enum.Font.GothamSemibold
+SaveScriptBtn.TextSize         = 13
+SaveScriptBtn.TextColor3       = Theme.Text
+SaveScriptBtn.BorderSizePixel  = 0
+SaveScriptBtn.ZIndex           = 8
+SaveScriptBtn.AutoButtonColor  = false
+ApplyCorner(SaveScriptBtn, 10)
+local SaveSGrad = Instance.new("UIGradient", SaveScriptBtn)
+SaveSGrad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
+SaveSGrad.Rotation = 90
+SaveScriptBtn.MouseEnter:Connect(function()
+    TweenService:Create(SaveScriptBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.PurpleLight}):Play()
+end)
+SaveScriptBtn.MouseLeave:Connect(function()
+    TweenService:Create(SaveScriptBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Purple}):Play()
+end)
+SaveScriptBtn.MouseButton1Click:Connect(function()
+    if not hasFileSystem then
+        SaveScriptBtn.Text = "✘ Executor no soporta writefile"
+        task.delay(3, function()
+            if SaveScriptBtn and SaveScriptBtn.Parent then
+                SaveScriptBtn.Text = "📁  Guardar Script en Disco (Auto-Run)"
+            end
+        end)
+        return
+    end
+    -- Guardar el script actual en disco para que el executor lo ejecute
+    -- al unirse al nuevo servidor (via autorun folder o manualmente)
+    pcall(function()
+        -- Intentar obtener el source del script actual
+        local src = nil
+        -- Método 1: getscriptsource / getscriptbytecode (Synapse, Wave)
+        pcall(function() src = getscriptsource and getscriptsource() end)
+        -- Método 2: leer desde workspace si está disponible  
+        if not src or #src < 100 then
+            -- Guardar instrucciones en su lugar
+            src = readfile and isfile(SCRIPT_FILE) and readfile(SCRIPT_FILE) or nil
+        end
+        if src and #src > 100 then
+            writefile(SCRIPT_FILE, src)
+            writefile("autorun/" .. SCRIPT_FILE, src)  -- carpeta autorun del executor
+            SaveScriptBtn.Text = "✔  Guardado en autorun/"
+            TweenService:Create(SaveScriptBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(30,60,35)}):Play()
+        else
+            -- Si no podemos obtener el source, pedir al usuario que lo pegue manualmente
+            SaveScriptBtn.Text = "⚠ Guarda el .lua en autorun/ manualmente"
+            TweenService:Create(SaveScriptBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(60,40,10)}):Play()
+        end
+        SaveScriptToDisk()
+    end)
+    task.delay(4, function()
+        if SaveScriptBtn and SaveScriptBtn.Parent then
+            SaveScriptBtn.Text = "📁  Guardar Script en Disco (Auto-Run)"
+            TweenService:Create(SaveScriptBtn, TweenInfo.new(0.3), {BackgroundColor3 = Theme.Purple}):Play()
+        end
+    end)
+end)
+
+-- =========================================================
+-- Guardar config cuando cambia cualquier estado importante
+-- (llamar SaveConfig() en los toggles/sliders clave)
+-- =========================================================
+TeleportService.LocalPlayerArrivedFromTeleport:Connect(function()
+    -- Restaurar toggles al llegar al nuevo servidor
+    task.wait(1)
+    if States.SparkleAlarmEnabled then
+        print("[MrCalvoHub] Config restaurada: SparkleAlarm activa")
+    end
+    if States.AutoServerHopEnabled then
+        print("[MrCalvoHub] Config restaurada: AutoHop activo")
+    end
+end)
+
+-- =========================================================
+-- F9 SHORTCUT
+-- =========================================================
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.F9 then
+        ScanBtn:FireButton1Click()
+    end
+end)
+
+-- Guardar config al salir/cerrar
+game:BindToClose(function()
+    SaveConfig()
+    SaveScriptToDisk()
+end)
+
+print("[MrCalvoHub v6.0] ✓ Cargado — AutoSave + AutoRestart + Config Persistente.")
+if States.AutoSaveEnabled then
+    print("[MrCalvoHub] Config guardada cargada — AutoSave activo")
+end
+if States.AutoServerHopEnabled then
+    print("[MrCalvoHub] AutoHop restaurado: ACTIVO")
+end
+if States.SparkleAlarmEnabled then
+    print("[MrCalvoHub] SparkleAlarm restaurada: ACTIVA")
+end

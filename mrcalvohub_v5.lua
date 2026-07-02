@@ -1,203 +1,24 @@
 -- [[ MrCalvoHub v6.0 - AutoSave + AutoRestart + Config Persistente ]]
 -- Credits: Daley + MrCalvoConPelo
 
-local Players        = game:GetService("Players")
-local RunService     = game:GetService("RunService")
+-- =========================================================
+-- SERVICIOS
+-- =========================================================
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Workspace      = game:GetService("Workspace")
-local TweenService   = game:GetService("TweenService")
+local Workspace        = game:GetService("Workspace")
+local TweenService     = game:GetService("TweenService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-local TeleportService = game:GetService("TeleportService")
-
-local HttpService     = game:GetService("HttpService")
-
--- =========================================================
--- SISTEMA DE GUARDADO DE CONFIGURACION
--- Usa writefile/readfile del executor para guardar config
--- en disco como JSON. El archivo se guarda en:
---   MrCalvoHub_config.json
--- =========================================================
-local CONFIG_FILE  = "MrCalvoHub_config.json"
-local CONFIG_URL   = "https://raw.githubusercontent.com/MrCalvoConPelo/hub/main/mrcalvohub.lua"
-
--- Detectar si el executor soporta writefile/readfile
-local hasFileSystem = (type(writefile) == "function" and type(readfile) == "function")
-
-local function SaveConfig()
-    if not hasFileSystem then return end
-    if not States.AutoSaveEnabled then return end
-    local ok, err = pcall(function()
-        local data = {
-            -- Utilities (los mas importantes para persistir)
-            SparkleAlarmEnabled  = States.SparkleAlarmEnabled,
-            AutoServerHopEnabled = States.AutoServerHopEnabled,
-            AutoSaveEnabled      = States.AutoSaveEnabled,
-            AutoRestartEnabled   = States.AutoRestartEnabled,
-            -- Movement
-            SpeedEnabled  = States.SpeedEnabled,
-            SpeedValue    = States.SpeedValue,
-            FlyEnabled    = States.FlyEnabled,
-            FlySpeed      = States.FlySpeed,
-            NoclipEnabled = States.NoclipEnabled,
-            AutoFightWalk = States.AutoFightWalk,
-            W_Duration    = States.W_Duration,
-            A_Duration    = States.A_Duration,
-            S_Duration    = States.S_Duration,
-            D_Duration    = States.D_Duration,
-            -- Evomon
-            KillAuraEnabled       = States.KillAuraEnabled,
-            TeleportRange         = States.TeleportRange,
-            AutoSpamEEnabled      = States.AutoSpamEEnabled,
-            AutoLeaveBattleEnabled = States.AutoLeaveBattleEnabled,
-            WhitelistEnabled      = States.WhitelistEnabled,
-            WhitelistString       = States.WhitelistString,
-            TeleportEnabled       = States.TeleportEnabled,
-            TeleportOffset        = States.TeleportOffset,
-            VelocityNudgeEnabled  = States.VelocityNudgeEnabled,
-            NudgeStrength         = States.NudgeStrength,
-        }
-        writefile(CONFIG_FILE, HttpService:JSONEncode(data))
-    end)
-    if not ok then
-        warn("[MrCalvoHub] Error guardando config: " .. tostring(err))
-    end
-end
-
-local function LoadConfig()
-    if not hasFileSystem then return {} end
-    local ok, data = pcall(function()
-        if not isfile(CONFIG_FILE) then return {} end
-        local raw = readfile(CONFIG_FILE)
-        return HttpService:JSONDecode(raw)
-    end)
-    if ok and type(data) == "table" then
-        return data
-    end
-    return {}
-end
-
--- Cargar config guardada al inicio
-local savedConfig = LoadConfig()
-local function ApplySavedBool(key, default)
-    if savedConfig[key] ~= nil then return savedConfig[key] end
-    return default
-end
-local function ApplySavedNum(key, default)
-    if savedConfig[key] ~= nil then return tonumber(savedConfig[key]) or default end
-    return default
-end
-
--- Aplicar valores guardados a States ANTES de crear la UI
-States.AutoSaveEnabled      = ApplySavedBool("AutoSaveEnabled",      false)
-States.AutoRestartEnabled   = ApplySavedBool("AutoRestartEnabled",   false)
-States.SparkleAlarmEnabled  = ApplySavedBool("SparkleAlarmEnabled",  false)
-States.AutoServerHopEnabled = ApplySavedBool("AutoServerHopEnabled", false)
-States.SpeedEnabled         = ApplySavedBool("SpeedEnabled",         false)
-States.SpeedValue           = ApplySavedNum ("SpeedValue",           50)
-States.FlyEnabled           = ApplySavedBool("FlyEnabled",           false)
-States.FlySpeed             = ApplySavedNum ("FlySpeed",             50)
-States.NoclipEnabled        = ApplySavedBool("NoclipEnabled",        false)
-States.AutoFightWalk        = ApplySavedBool("AutoFightWalk",        false)
-States.W_Duration           = ApplySavedNum ("W_Duration",           2)
-States.A_Duration           = ApplySavedNum ("A_Duration",           2)
-States.S_Duration           = ApplySavedNum ("S_Duration",           2)
-States.D_Duration           = ApplySavedNum ("D_Duration",           2)
-States.KillAuraEnabled      = ApplySavedBool("KillAuraEnabled",      false)
-States.TeleportRange        = ApplySavedNum ("TeleportRange",        75)
-States.AutoSpamEEnabled     = ApplySavedBool("AutoSpamEEnabled",     false)
-States.AutoLeaveBattleEnabled = ApplySavedBool("AutoLeaveBattleEnabled", false)
-States.WhitelistEnabled     = ApplySavedBool("WhitelistEnabled",     false)
-States.WhitelistString      = (savedConfig["WhitelistString"] ~= nil) and tostring(savedConfig["WhitelistString"]) or ""
-States.TeleportEnabled      = ApplySavedBool("TeleportEnabled",      true)
-States.TeleportOffset       = ApplySavedNum ("TeleportOffset",       5)
-States.VelocityNudgeEnabled = ApplySavedBool("VelocityNudgeEnabled", true)
-States.NudgeStrength        = ApplySavedNum ("NudgeStrength",        55)
-
--- Auto-guardar cada 15 segundos si esta activo
-task.spawn(function()
-    while true do
-        task.wait(15)
-        SaveConfig()
-    end
-end)
-
--- Si tras cargar la config el AutoHop estaba activo, notificarlo
-if States.AutoServerHopEnabled then
-    print("[MrCalvoHub] AutoHop restaurado desde config guardada")
-end
-if States.SparkleAlarmEnabled then
-    print("[MrCalvoHub] SparkleAlarm restaurada desde config guardada")
-    -- Re-hookear chat al cargar si la alarm estaba activa
-    task.delay(3, HookAllChatMethods)
-end
-
--- =========================================================
--- AUTO-RESTART TRAS TELEPORT
--- Cuando el jugador llega a un nuevo servidor tras un hop,
--- el script se cierra. Para auto-reiniciarse, guardamos un
--- flag en la config y usamos TeleportService.LocalPlayerArrivedFromTeleport
--- para re-ejecutar el script automaticamente.
--- =========================================================
-local SCRIPT_URL = "https://raw.githubusercontent.com/MrCalvoConPelo/hub/main/mrcalvohub.lua"
--- IMPORTANTE: el usuario debe subir el script a esa URL, o cambiarla
--- por donde aloje su script (Pastebin, GitHub raw, etc.)
-
--- Alternativa sin URL: guardar el propio script en disco y ejecutarlo
-local SCRIPT_FILE = "MrCalvoHub_autorun.lua"
-
-local function SaveScriptToDisk()
-    if not hasFileSystem then return end
-    pcall(function()
-        -- Guardamos el script actual en disco para auto-ejecucion
-        local src = game:GetService("ScriptContext"):GetCurrentThreadIdentity and 
-                    "-- script guardado" or "-- script"
-        -- En Synapse/Wave podemos obtener el source con getscriptbytecode
-        -- Guardamos el flag de que debe auto-reiniciarse
-        local restartFlag = {
-            shouldRestart        = States.AutoRestartEnabled,
-            SparkleAlarmEnabled  = States.SparkleAlarmEnabled,
-            AutoServerHopEnabled = States.AutoServerHopEnabled,
-            AutoSaveEnabled      = States.AutoSaveEnabled,
-            AutoRestartEnabled   = States.AutoRestartEnabled,
-        }
-        writefile("MrCalvoHub_restart.json", HttpService:JSONEncode(restartFlag))
-    end)
-end
-
--- Detectar llegada tras teleport y auto-reiniciar
-pcall(function()
-    TeleportService.LocalPlayerArrivedFromTeleport:Connect(function(loadingGui, dataTable)
-        task.wait(3)  -- esperar a que cargue el juego
-        if not hasFileSystem then return end
-        -- Leer flag de restart
-        pcall(function()
-            if not isfile("MrCalvoHub_restart.json") then return end
-            local raw  = readfile("MrCalvoHub_restart.json")
-            local flag = HttpService:JSONDecode(raw)
-            if flag.shouldRestart then
-                print("[MrCalvoHub] Auto-reinicio tras teleport detectado...")
-                -- Intentar cargar desde archivo guardado en disco
-                if isfile(SCRIPT_FILE) then
-                    local src = readfile(SCRIPT_FILE)
-                    loadstring(src)()
-                else
-                    -- Cargar desde URL (requiere internet + URL configurada)
-                    local ok, src = pcall(game.HttpGet, game, SCRIPT_URL)
-                    if ok and src and #src > 100 then
-                        loadstring(src)()
-                    else
-                        warn("[MrCalvoHub] No se pudo auto-reiniciar: archivo no encontrado.")
-                        warn("[MrCalvoHub] Sube el script a una URL y configura SCRIPT_URL.")
-                    end
-                end
-            end
-        end)
-    end)
-end)
+local TeleportService  = game:GetService("TeleportService")
+local HttpService      = game:GetService("HttpService")
 
 local LP     = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
+-- =========================================================
+-- TEMA VISUAL
+-- =========================================================
 local Theme = {
     BG          = Color3.fromRGB(11, 11, 18),
     Card        = Color3.fromRGB(19, 19, 32),
@@ -213,59 +34,133 @@ local Theme = {
     ToggleOff   = Color3.fromRGB(42, 37, 64),
 }
 
+-- =========================================================
+-- FILESYSTEM — detectar capacidades del executor
+-- =========================================================
+local hasFS = type(writefile) == "function"
+          and type(readfile)  == "function"
+          and type(isfile)    == "function"
+
+local CONFIG_FILE  = "MrCalvoHub_config.json"
+local RESTART_FILE = "MrCalvoHub_restart.json"
+local SCRIPT_FILE  = "MrCalvoHub_autorun.lua"
+
+-- =========================================================
+-- SISTEMA DE CONFIGURACIÓN
+-- =========================================================
+local function SafeReadJSON(file)
+    if not hasFS then return {} end
+    local ok, result = pcall(function()
+        if not isfile(file) then return {} end
+        return HttpService:JSONDecode(readfile(file))
+    end)
+    return (ok and type(result) == "table") and result or {}
+end
+
+local function SafeWriteJSON(file, data)
+    if not hasFS then return end
+    pcall(writefile, file, HttpService:JSONEncode(data))
+end
+
+-- Leer config al inicio
+local savedCfg = SafeReadJSON(CONFIG_FILE)
+
+local function Cfg(key, default)
+    local v = savedCfg[key]
+    if v == nil then return default end
+    if type(default) == "number" then return tonumber(v) or default end
+    return v
+end
+
+-- =========================================================
+-- STATES — inicializados con config guardada
+-- =========================================================
 local States = {
-    SpeedEnabled = false, SpeedValue = 50,
-    FlyEnabled = false, FlySpeed = 50,
-    NoclipEnabled = false,
-    AutoFightWalk = false, W_Duration = 2, A_Duration = 2, S_Duration = 2, D_Duration = 2,
-    KillAuraEnabled = false, TeleportRange = 75,
-    TeleportEnabled = true, VelocityNudgeEnabled = true,
-    NudgeStrength = 55, TeleportOffset = 5,
-    AutoLeaveBattleEnabled = false, AutoSpamEEnabled = false,
-    WhitelistEnabled = false, WhitelistString = "",
-    SparkleAlarmEnabled = false,
-    AutoServerHopEnabled = false,
-    AutoSaveEnabled = false,
-    AutoRestartEnabled = false,
+    -- Movement
+    SpeedEnabled  = Cfg("SpeedEnabled",  false),
+    SpeedValue    = Cfg("SpeedValue",    50),
+    FlyEnabled    = Cfg("FlyEnabled",    false),
+    FlySpeed      = Cfg("FlySpeed",      50),
+    NoclipEnabled = Cfg("NoclipEnabled", false),
+    AutoFightWalk = Cfg("AutoFightWalk", false),
+    W_Duration    = Cfg("W_Duration",    2),
+    A_Duration    = Cfg("A_Duration",    2),
+    S_Duration    = Cfg("S_Duration",    2),
+    D_Duration    = Cfg("D_Duration",    2),
+    -- Evomon
+    KillAuraEnabled        = Cfg("KillAuraEnabled",        false),
+    TeleportRange          = Cfg("TeleportRange",          75),
+    AutoSpamEEnabled       = Cfg("AutoSpamEEnabled",       false),
+    AutoLeaveBattleEnabled = Cfg("AutoLeaveBattleEnabled", false),
+    WhitelistEnabled       = Cfg("WhitelistEnabled",       false),
+    WhitelistString        = Cfg("WhitelistString",        ""),
+    TeleportEnabled        = Cfg("TeleportEnabled",        true),
+    TeleportOffset         = Cfg("TeleportOffset",         5),
+    VelocityNudgeEnabled   = Cfg("VelocityNudgeEnabled",  true),
+    NudgeStrength          = Cfg("NudgeStrength",          55),
+    -- Utilities
+    SparkleAlarmEnabled  = Cfg("SparkleAlarmEnabled",  false),
+    AutoServerHopEnabled = Cfg("AutoServerHopEnabled", false),
+    AutoSaveEnabled      = Cfg("AutoSaveEnabled",      false),
+    AutoRestartEnabled   = Cfg("AutoRestartEnabled",   false),
 }
 
--- =========================================================
--- SERVIDOR PRIVADO
--- Link: https://www.roblox.com/share?code=98ccafc4553b6346963b1c1c4e093075&type=Server
--- El code del link es el ReservedServerAccessCode.
--- La API de Roblox permite obtener el JobId del servidor privado
--- via: https://games.roblox.com/v1/games/{placeId}/servers/Reserved?limit=100
--- Luego usamos TeleportToPlaceInstance con ese JobId (igual que el
--- serverHop publico pero apuntando al servidor privado).
--- =========================================================
-local RESERVED_ACCESS_CODE = "98ccafc4553b6346963b1c1c4e093075"
-local PLACE_ID              = game.PlaceId
+local function SaveConfig()
+    if not States.AutoSaveEnabled then return end
+    SafeWriteJSON(CONFIG_FILE, {
+        SpeedEnabled           = States.SpeedEnabled,
+        SpeedValue             = States.SpeedValue,
+        FlyEnabled             = States.FlyEnabled,
+        FlySpeed               = States.FlySpeed,
+        NoclipEnabled          = States.NoclipEnabled,
+        AutoFightWalk          = States.AutoFightWalk,
+        W_Duration             = States.W_Duration,
+        A_Duration             = States.A_Duration,
+        S_Duration             = States.S_Duration,
+        D_Duration             = States.D_Duration,
+        KillAuraEnabled        = States.KillAuraEnabled,
+        TeleportRange          = States.TeleportRange,
+        AutoSpamEEnabled       = States.AutoSpamEEnabled,
+        AutoLeaveBattleEnabled = States.AutoLeaveBattleEnabled,
+        WhitelistEnabled       = States.WhitelistEnabled,
+        WhitelistString        = States.WhitelistString,
+        TeleportEnabled        = States.TeleportEnabled,
+        TeleportOffset         = States.TeleportOffset,
+        VelocityNudgeEnabled   = States.VelocityNudgeEnabled,
+        NudgeStrength          = States.NudgeStrength,
+        SparkleAlarmEnabled    = States.SparkleAlarmEnabled,
+        AutoServerHopEnabled   = States.AutoServerHopEnabled,
+        AutoSaveEnabled        = States.AutoSaveEnabled,
+        AutoRestartEnabled     = States.AutoRestartEnabled,
+    })
+end
+
+-- AutoSave loop
+task.spawn(function()
+    while true do
+        task.wait(15)
+        SaveConfig()
+    end
+end)
 
 -- =========================================================
--- ALARMA DE SONIDO
--- Looped=true en Workspace para maxima compatibilidad en exploits.
--- Usamos un sonido corto que en loop suena como alarma de pulsos.
+-- ALARMA — Sound local, sin depender de CDN
+-- rbxasset:// siempre carga sin importar el executor
 -- =========================================================
 local alarmSound         = Instance.new("Sound")
--- IDs de audio publicos de Roblox verificados que cargan en exploits:
--- 9120386339 = alerta, 4590662766 = campana, 1369158」= beep
--- Usamos rbxasset local como ultimo recurso garantizado
-alarmSound.SoundId       = "rbxassetid://9120386339"
-alarmSound.Volume        = 3
+alarmSound.SoundId       = "rbxasset://sounds/button.wav"   -- asset LOCAL de Roblox, siempre disponible
+alarmSound.Volume        = 5
 alarmSound.Looped        = true
-alarmSound.PlaybackSpeed = 1.0
-alarmSound.RollOffMaxDistance = 100000
+alarmSound.PlaybackSpeed = 2.5   -- más rápido = sonido de alarma
 alarmSound.Parent        = Workspace
 
--- Si el primer SoundId no carga, probar alternativas
-task.delay(2, function()
-    if alarmSound.IsLoaded then return end
-    alarmSound.SoundId = "rbxassetid://4590662766"
-    task.delay(2, function()
-        if alarmSound.IsLoaded then return end
-        alarmSound.SoundId = "rbxassetid://1369158"
-    end)
-end)
+-- Si el asset local no suena (Roblox lo ha movido), fallback a IDs conocidos
+local ALARM_IDS = {
+    "rbxasset://sounds/button.wav",
+    "rbxasset://sounds/electronicpingshort.wav",
+    "rbxasset://sounds/snap.wav",
+}
+local alarmIdIndex = 1
 
 local alarmRunning = false
 
@@ -273,8 +168,17 @@ local function PlayAlarm()
     if alarmRunning then return end
     alarmRunning = true
     alarmSound:Stop()
+    alarmSound.SoundId = ALARM_IDS[alarmIdIndex]
     alarmSound:Play()
-    print("[MrCalvoHub] Alarma activada")
+    -- Si no carga en 1s, probar siguiente ID
+    task.delay(1, function()
+        if alarmRunning and not alarmSound.IsPlaying then
+            alarmIdIndex = (alarmIdIndex % #ALARM_IDS) + 1
+            alarmSound.SoundId = ALARM_IDS[alarmIdIndex]
+            alarmSound:Play()
+        end
+    end)
+    print("[MrCalvoHub] ALARMA ACTIVADA")
 end
 
 local function StopAlarm()
@@ -285,38 +189,31 @@ end
 
 -- =========================================================
 -- SERVER HOP AL SERVIDOR PRIVADO
+-- Link: https://www.roblox.com/share?code=98ccafc4553b6346963b1c1c4e093075&type=Server
 --
--- El RESERVED_ACCESS_CODE del link compartido NO es un JobId,
--- por eso TeleportToPlaceInstance(placeId, code) falla con
--- "Could not find game instance".
---
--- Solucion correcta: pedir el JobId real del servidor privado
--- via la API de Roblox:
---   GET https://games.roblox.com/v1/games/{placeId}/servers/Reserved?limit=10
--- Esta API devuelve los servidores reservados con su "id" (JobId).
--- Luego usamos TeleportToPlaceInstance(placeId, jobId, player).
---
--- Si la API falla (no autenticado), usamos el fallback publico
--- identico al ejemplo que paso el usuario.
+-- Estrategia correcta (igual que el ejemplo del usuario):
+-- 1) Pedir a la API de Roblox los servidores Reserved del juego
+--    para obtener el JobId real del servidor privado.
+-- 2) TeleportToPlaceInstance(placeId, jobId, player)
+-- 3) Fallback: servidor público aleatorio (idéntico al ejemplo)
 -- =========================================================
-local hopCooldown    = false
-local hopCooldownSec = 12
-local lastHopTime    = 0
-local privateJobId   = nil   -- se cachea al primer hop exitoso
+local PLACE_ID  = game.PlaceId
+local PRIV_CODE = "98ccafc4553b6346963b1c1c4e093075"
 
-local function GetPrivateServerJobId()
-    -- Intentar obtener el JobId real del servidor privado via API
-    local url = "https://games.roblox.com/v1/games/" .. PLACE_ID
-                .. "/servers/Reserved?limit=10&sortOrder=Asc"
-    local ok, raw = pcall(function()
-        return game:HttpGet(url, true)
-    end)
+local hopCooldown = false
+local hopLock     = false
+local privateJobId = nil  -- cache del JobId del servidor privado
+
+local function GetPrivateJobId()
+    -- Obtener JobId del servidor privado via API de Roblox
+    local ok, raw = pcall(game.HttpGet, game,
+        "https://games.roblox.com/v1/games/" .. PLACE_ID .. "/servers/Reserved?limit=10&sortOrder=Asc", true)
     if not ok or not raw then return nil end
     local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
     if not ok2 or not data or not data.data then return nil end
     for _, srv in ipairs(data.data) do
-        if srv.id and srv.id ~= "" then
-            print("[MrCalvoHub] JobId del servidor privado obtenido: " .. srv.id)
+        if type(srv.id) == "string" and #srv.id > 10 then
+            print("[MrCalvoHub] JobId privado obtenido: " .. srv.id)
             return srv.id
         end
     end
@@ -324,40 +221,52 @@ local function GetPrivateServerJobId()
 end
 
 local function DoServerHop()
-    if hopCooldown then return false end
+    if hopCooldown or hopLock then return end
     hopCooldown = true
-    lastHopTime = tick()
+    hopLock     = true
 
     task.spawn(function()
-        print("[MrCalvoHub] Iniciando ServerHop...")
+        print("[MrCalvoHub] ServerHop iniciado...")
         local jumped = false
 
-        -- Metodo 1: Obtener JobId real del servidor privado y teleportar
+        -- Guardar flag de restart ANTES de hopear
+        if hasFS and States.AutoRestartEnabled then
+            SafeWriteJSON(RESTART_FILE, { shouldRestart = true })
+            -- Guardar script en autorun si existe
+            pcall(function()
+                if isfile(SCRIPT_FILE) then
+                    -- ya está guardado
+                elseif hasFS then
+                    -- intentar escribir un loader mínimo que ejecute desde config
+                    writefile(SCRIPT_FILE, "-- MrCalvoHub autorun placeholder")
+                end
+            end)
+        end
+
+        -- Intento 1: JobId real del servidor privado
         if not privateJobId then
-            privateJobId = GetPrivateServerJobId()
+            privateJobId = GetPrivateJobId()
         end
 
         if privateJobId then
-            local ok1, err1 = pcall(function()
-                TeleportService:TeleportToPlaceInstance(PLACE_ID, privateJobId, LP)
-            end)
-            if ok1 then
-                print("[MrCalvoHub] Hop OK al servidor privado (JobId: " .. privateJobId .. ")")
+            local ok, err = pcall(TeleportService.TeleportToPlaceInstance,
+                TeleportService, PLACE_ID, privateJobId, LP)
+            if ok then
+                print("[MrCalvoHub] Hop OK → servidor privado (" .. privateJobId .. ")")
                 jumped = true
             else
-                warn("[MrCalvoHub] TeleportToPlaceInstance fallo: " .. tostring(err1))
-                privateJobId = nil  -- invalidar cache si fallo
+                warn("[MrCalvoHub] Hop privado falló: " .. tostring(err))
+                privateJobId = nil  -- invalidar cache
             end
         end
 
-        -- Metodo 2 (si no conseguimos el JobId): API publica identica al ejemplo del usuario
-        -- Salta a cualquier servidor disponible del mismo juego
+        -- Intento 2 (fallback): servidor público disponible
+        -- Idéntico al ejemplo del usuario
         if not jumped then
             local ok2, err2 = pcall(function()
                 local raw = game:HttpGet(
                     "https://games.roblox.com/v1/games/" .. PLACE_ID
-                    .. "/servers/Public?sortOrder=Asc&limit=100"
-                )
+                    .. "/servers/Public?sortOrder=Asc&limit=100")
                 local data = HttpService:JSONDecode(raw)
                 local candidates = {}
                 for _, srv in ipairs(data.data or {}) do
@@ -368,34 +277,73 @@ local function DoServerHop()
                 if #candidates > 0 then
                     local target = candidates[math.random(1, #candidates)]
                     TeleportService:TeleportToPlaceInstance(PLACE_ID, target, LP)
-                    print("[MrCalvoHub] Hop OK servidor publico (fallback): " .. target)
+                    print("[MrCalvoHub] Hop OK → servidor público: " .. target)
                     jumped = true
                 else
-                    warn("[MrCalvoHub] Sin servidores publicos disponibles")
+                    warn("[MrCalvoHub] Sin servidores públicos disponibles")
                 end
             end)
             if not ok2 then
-                warn("[MrCalvoHub] Fallback publico fallo: " .. tostring(err2))
+                warn("[MrCalvoHub] Fallback público falló: " .. tostring(err2))
             end
         end
 
-        task.delay(hopCooldownSec, function() hopCooldown = false end)
+        task.delay(12, function()
+            hopCooldown = false
+            hopLock     = false
+        end)
     end)
-
-    return true
 end
 
 -- =========================================================
--- DETECTOR DE CHAT — SPARKLE EVOMON
--- Estrategia: polling activo de TODOS los TextLabel/TextBox
--- visibles en el PlayerGui cada 0.5s, buscando el mensaje.
--- Esto es lo más fiable en exploits donde los eventos de chat
--- pueden estar bloqueados o retrasados.
+-- AUTO-RESTART TRAS TELEPORT
+-- Al llegar al nuevo servidor, leer el flag y re-ejecutar
+-- el script desde disco (SCRIPT_FILE) o desde una URL.
 -- =========================================================
-local sparkleDetected  = false
-local lastSparkleMsg   = ""
-local lastSparkleTime  = 0
-local seenMessages     = {}   -- evita duplicados
+local function SetupAutoRestart()
+    pcall(function()
+        TeleportService.LocalPlayerArrivedFromTeleport:Connect(function()
+            task.wait(4)
+            if not hasFS then return end
+            local flag = SafeReadJSON(RESTART_FILE)
+            if not flag.shouldRestart then return end
+            print("[MrCalvoHub] Detectado llegada tras hop — auto-reiniciando...")
+            -- Borrar flag para no loop infinito
+            SafeWriteJSON(RESTART_FILE, { shouldRestart = false })
+            -- Ejecutar script guardado
+            local src = nil
+            pcall(function()
+                if isfile(SCRIPT_FILE) then
+                    src = readfile(SCRIPT_FILE)
+                    -- Validar que no es el placeholder
+                    if src and #src < 200 then src = nil end
+                end
+            end)
+            if src then
+                local fn, compileErr = loadstring(src)
+                if fn then
+                    fn()
+                else
+                    warn("[MrCalvoHub] Error compilando script: " .. tostring(compileErr))
+                end
+            else
+                warn("[MrCalvoHub] Script no encontrado en disco.")
+                warn("[MrCalvoHub] Guarda el .lua como: " .. SCRIPT_FILE)
+            end
+        end)
+    end)
+end
+
+SetupAutoRestart()
+
+-- =========================================================
+-- DETECTOR DE CHAT — SPARKLE EVOMON
+-- Polling activo de PlayerGui + hooks de TextChatService
+-- =========================================================
+local sparkleDetected = false
+local lastSparkleMsg  = ""
+local lastSparkleTime = 0
+local seenMessages    = {}
 
 local function CheckTextForSparkle(text)
     if not States.SparkleAlarmEnabled then return end
@@ -403,23 +351,20 @@ local function CheckTextForSparkle(text)
     local lower = text:lower()
     if lower:find("sparkle evomon has appeared") or
        (lower:find("sparkle") and lower:find("appeared")) then
-        -- Dedup: ignorar si ya vimos este texto hace menos de 30s
         if seenMessages[text] and (tick() - seenMessages[text]) < 30 then return end
         seenMessages[text] = tick()
-        lastSparkleMsg  = text
-        lastSparkleTime = tick()
-        sparkleDetected = true
+        lastSparkleMsg     = text
+        lastSparkleTime    = tick()
+        sparkleDetected    = true
         print("[MrCalvoHub] ¡¡SPARKLE!! → " .. text)
         PlayAlarm()
     end
 end
 
--- Hookea todos los canales de chat posibles
 local function HookAllChatMethods()
-    -- 1) TextChatService (API moderna, Roblox 2022+)
+    -- 1) TextChatService moderno
     pcall(function()
         local TCS = game:GetService("TextChatService")
-        -- Hookear canales existentes
         for _, ch in ipairs(TCS:GetDescendants()) do
             if ch:IsA("TextChannel") then
                 ch.MessageReceived:Connect(function(msg)
@@ -427,7 +372,6 @@ local function HookAllChatMethods()
                 end)
             end
         end
-        -- Hookear canales que se creen después
         TCS.DescendantAdded:Connect(function(d)
             if d:IsA("TextChannel") then
                 d.MessageReceived:Connect(function(msg)
@@ -436,41 +380,30 @@ local function HookAllChatMethods()
             end
         end)
     end)
-
-    -- 2) Chat legacy (Roblox legacy chat system)
+    -- 2) Chat legacy
     pcall(function()
-        local ChatSvc = game:GetService("Chat")
-        if ChatSvc then
-            ChatSvc.Chatted:Connect(function(part, msg)
-                CheckTextForSparkle(tostring(msg))
-            end)
-        end
+        game:GetService("Chat").Chatted:Connect(function(_, msg)
+            CheckTextForSparkle(tostring(msg))
+        end)
     end)
-
-    -- 3) Escuchar todos los mensajes de Players
+    -- 3) Player.Chatted
     for _, p in ipairs(Players:GetPlayers()) do
         p.Chatted:Connect(function(msg) CheckTextForSparkle(msg) end)
     end
     Players.PlayerAdded:Connect(function(p)
         p.Chatted:Connect(function(msg) CheckTextForSparkle(msg) end)
     end)
-
-    -- 4) DescendantAdded en PlayerGui — captura mensajes de sistema
-    --    que aparecen como TextLabel (el mensaje de Sparkle viene del server
-    --    como un mensaje de sistema/hint, no de un jugador)
+    -- 4) PlayerGui DescendantAdded
     pcall(function()
         local pg = LP:WaitForChild("PlayerGui", 8)
         pg.DescendantAdded:Connect(function(d)
             if d:IsA("TextLabel") or d:IsA("TextBox") then
-                -- Chequear texto inmediato
                 CheckTextForSparkle(d.Text)
-                -- Y cambios futuros
                 d:GetPropertyChangedSignal("Text"):Connect(function()
                     CheckTextForSparkle(d.Text)
                 end)
             end
         end)
-        -- Hookear los que ya existen
         for _, d in ipairs(pg:GetDescendants()) do
             if d:IsA("TextLabel") or d:IsA("TextBox") then
                 d:GetPropertyChangedSignal("Text"):Connect(function()
@@ -481,17 +414,15 @@ local function HookAllChatMethods()
     end)
 end
 
--- 5) POLLING activo: escanea todo el PlayerGui cada 0.5s
---    Es el método más agresivo y fiable para mensajes de sistema
+-- Polling activo cada 0.5s
 task.spawn(function()
-    task.wait(3) -- esperar a que cargue el juego
+    task.wait(3)
     HookAllChatMethods()
     while true do
         task.wait(0.5)
         if not States.SparkleAlarmEnabled then continue end
         pcall(function()
-            local pg = LP.PlayerGui
-            for _, d in ipairs(pg:GetDescendants()) do
+            for _, d in ipairs(LP.PlayerGui:GetDescendants()) do
                 if (d:IsA("TextLabel") or d:IsA("TextBox")) and d.Text and #d.Text > 10 then
                     CheckTextForSparkle(d.Text)
                 end
@@ -500,31 +431,26 @@ task.spawn(function()
     end
 end)
 
+-- Restaurar SparkleAlarm si estaba activo al cargar
+if States.SparkleAlarmEnabled then
+    print("[MrCalvoHub] SparkleAlarm restaurada desde config")
+end
+
 -- =========================================================
 -- AUTO-HOP LOOP
--- Logica CORRECTA:
---   Si AutoServerHopEnabled = true Y SparkleAlarmEnabled = true:
---     → Hop cada 10s mientras NO haya sparkle en el servidor
---     → Si detecta sparkle: PARA el hop, suena alarma, espera
---       a que el usuario la silencia manualmente
+-- Sin sparkle → hop cada 10s buscando
+-- Con sparkle → para, mantiene alarma sonando
 -- =========================================================
 task.spawn(function()
     while true do
         task.wait(10)
-
         if not States.AutoServerHopEnabled then continue end
         if not States.SparkleAlarmEnabled  then continue end
-
         if sparkleDetected then
-            -- SPARKLE ENCONTRADO en este servidor:
-            -- Mantener alarma sonando, NO hopear
-            -- El usuario silencia manualmente con el boton
-            if not alarmRunning then
-                PlayAlarm()
-            end
-            -- No hacer nada mas — seguir en bucle esperando que silencien
+            -- Sparkle encontrado: NO hopear, asegurar alarma sonando
+            if not alarmRunning then PlayAlarm() end
         else
-            -- Sin sparkle: hop al siguiente servidor a buscar
+            -- Sin sparkle: hop al siguiente servidor
             if not hopCooldown then
                 print("[MrCalvoHub] Auto-Hop: sin sparkle, cambiando servidor...")
                 DoServerHop()
@@ -538,8 +464,14 @@ end)
 -- =========================================================
 local BodyVelocity, BodyGyro
 
-local function GetRoot() local c = LP.Character return c and c:FindFirstChild("HumanoidRootPart") end
-local function GetHumanoid() local c = LP.Character return c and c:FindFirstChildOfClass("Humanoid") end
+local function GetRoot()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+local function GetHumanoid()
+    local c = LP.Character
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
 
 local function MatchesWhitelist(name)
     if not States.WhitelistEnabled or States.WhitelistString == "" then return true end
@@ -603,11 +535,11 @@ end
 local function AutoLeaveBattleLoop()
     while States.AutoLeaveBattleEnabled do
         local pg = LP:WaitForChild("PlayerGui")
-        local battleActive = pg:FindFirstChild("Catch", true)
-            or pg:FindFirstChild("Catch(2/2)", true)
-            or pg:FindFirstChild("CatchButton", true)
-            or pg:FindFirstChild("BattleGui", true)
-        if battleActive then
+        local ba = pg:FindFirstChild("Catch", true)
+               or pg:FindFirstChild("Catch(2/2)", true)
+               or pg:FindFirstChild("CatchButton", true)
+               or pg:FindFirstChild("BattleGui", true)
+        if ba then
             VirtualInputManager:SendKeyEvent(true,  Enum.KeyCode.C, false, game)
             task.wait(0.12)
             VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.C, false, game)
@@ -650,21 +582,21 @@ RunService.Heartbeat:Connect(function()
             BodyGyro = Instance.new("BodyGyro", root)
             BodyGyro.MaxTorque = Vector3.new(1e5,1e5,1e5)
         end
-        local moveDir = Vector3.new()
-        if UserInputService:IsKeyDown(Enum.KeyCode.W)            then moveDir += Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S)            then moveDir -= Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A)            then moveDir -= Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D)            then moveDir += Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space)        then moveDir += Vector3.new(0,1,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)  then moveDir -= Vector3.new(0,1,0) end
-        BodyVelocity.Velocity = (moveDir.Magnitude > 0 and moveDir.Unit or Vector3.new()) * States.FlySpeed
+        local md = Vector3.new()
+        if UserInputService:IsKeyDown(Enum.KeyCode.W)           then md += Camera.CFrame.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S)           then md -= Camera.CFrame.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A)           then md -= Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D)           then md += Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then md += Vector3.new(0,1,0)        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then md -= Vector3.new(0,1,0)        end
+        BodyVelocity.Velocity = (md.Magnitude > 0 and md.Unit or Vector3.new()) * States.FlySpeed
         BodyGyro.CFrame = Camera.CFrame
     else
         if BodyVelocity then BodyVelocity:Destroy() BodyVelocity = nil end
         if BodyGyro     then BodyGyro:Destroy()     BodyGyro     = nil end
         if States.SpeedEnabled then
-            local md = hum.MoveDirection * States.SpeedValue
-            root.Velocity = Vector3.new(md.X, root.Velocity.Y, md.Z)
+            local md2 = hum.MoveDirection * States.SpeedValue
+            root.Velocity = Vector3.new(md2.X, root.Velocity.Y, md2.Z)
         end
     end
 end)
@@ -672,29 +604,27 @@ end)
 -- =========================================================
 -- GUI HELPERS
 -- =========================================================
-local function ApplyCorner(parent, radius)
-    local c = Instance.new("UICorner", parent)
-    c.CornerRadius = UDim.new(0, radius or 12)
+local function ApplyCorner(p, r)
+    local c = Instance.new("UICorner", p)
+    c.CornerRadius = UDim.new(0, r or 12)
     return c
 end
-
-local function ApplyStroke(parent, color, thickness)
-    local s = Instance.new("UIStroke", parent)
-    s.Color     = color     or Theme.Border
-    s.Thickness = thickness or 1
+local function ApplyStroke(p, color, thick)
+    local s = Instance.new("UIStroke", p)
+    s.Color = color or Theme.Border
+    s.Thickness = thick or 1
     return s
 end
-
 local function MakeLabel(parent, text, size, color, font, xAlign)
     local l = Instance.new("TextLabel", parent)
-    l.Text            = text
-    l.TextSize        = size   or 14
-    l.TextColor3      = color  or Theme.Text
-    l.Font            = font   or Enum.Font.Gotham
+    l.Text = text
+    l.TextSize = size or 14
+    l.TextColor3 = color or Theme.Text
+    l.Font = font or Enum.Font.Gotham
     l.BackgroundTransparency = 1
-    l.TextXAlignment  = xAlign or Enum.TextXAlignment.Left
-    l.TextYAlignment  = Enum.TextYAlignment.Center
-    l.ZIndex          = 6
+    l.TextXAlignment = xAlign or Enum.TextXAlignment.Left
+    l.TextYAlignment = Enum.TextYAlignment.Center
+    l.ZIndex = 6
     return l
 end
 
@@ -702,283 +632,214 @@ end
 -- GUI ROOT
 -- =========================================================
 local ScreenGui = Instance.new("ScreenGui", game:GetService("CoreGui"))
-ScreenGui.Name         = "MrCalvoHub"
+ScreenGui.Name = "MrCalvoHub"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 local Main = Instance.new("Frame", ScreenGui)
-Main.Size                = UDim2.new(0, 860, 0, 620)
-Main.Position            = UDim2.new(0.5, -430, 0.5, -310)
-Main.BackgroundColor3    = Theme.BG
-Main.BorderSizePixel     = 0
-Main.ClipsDescendants    = true
+Main.Size = UDim2.new(0, 860, 0, 620)
+Main.Position = UDim2.new(0.5, -430, 0.5, -310)
+Main.BackgroundColor3 = Theme.BG
+Main.BorderSizePixel = 0
+Main.ClipsDescendants = true
 Main.BackgroundTransparency = 1
 ApplyCorner(Main, 16)
 
--- Animaciones open/close
-local isAnimating = false
-
+-- Animate open/close
+local isAnim = false
 local function ShowMain()
-    if isAnimating then return end
-    isAnimating = true
+    if isAnim then return end
+    isAnim = true
     Main.Visible = true
     Main.BackgroundTransparency = 1
     Main.Size = UDim2.new(0, 860, 0, 580)
     TweenService:Create(Main, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        BackgroundTransparency = 0,
-        Size = UDim2.new(0, 860, 0, 620),
+        BackgroundTransparency = 0, Size = UDim2.new(0, 860, 0, 620)
     }):Play()
-    task.delay(0.35, function() isAnimating = false end)
+    task.delay(0.35, function() isAnim = false end)
 end
-
 local function HideMain(cb)
-    if isAnimating then return end
-    isAnimating = true
+    if isAnim then return end
+    isAnim = true
     TweenService:Create(Main, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-        BackgroundTransparency = 1,
-        Size = UDim2.new(0, 860, 0, 580),
+        BackgroundTransparency = 1, Size = UDim2.new(0, 860, 0, 580)
     }):Play()
     task.delay(0.26, function()
         Main.Visible = false
-        isAnimating  = false
+        isAnim = false
         if cb then cb() end
     end)
 end
-
 ShowMain()
 
--- Fondo de estrellas animadas
+-- Stars background
 local StarContainer = Instance.new("Frame", Main)
-StarContainer.Size               = UDim2.new(1, 0, 1, 0)
+StarContainer.Size = UDim2.new(1,0,1,0)
 StarContainer.BackgroundTransparency = 1
-StarContainer.ZIndex             = 1
-StarContainer.ClipsDescendants   = true
-
+StarContainer.ZIndex = 1
+StarContainer.ClipsDescendants = true
 local stars = {}
 for i = 1, 22 do
-    local sz = 2 + math.random(0, 3)
-    local s  = Instance.new("Frame", StarContainer)
-    s.BackgroundColor3    = Theme.PurpleLight
-    s.Size                = UDim2.new(0, sz, 0, sz)
+    local sz = 2 + math.random(0,3)
+    local s = Instance.new("Frame", StarContainer)
+    s.BackgroundColor3 = Theme.PurpleLight
+    s.Size = UDim2.new(0,sz,0,sz)
     s.BackgroundTransparency = 0.1
-    s.BorderSizePixel     = 0
-    s.ZIndex              = 1
+    s.BorderSizePixel = 0
+    s.ZIndex = 1
     ApplyCorner(s, sz)
-    local stroke          = Instance.new("UIStroke", s)
-    stroke.Color          = Theme.Purple
-    stroke.Thickness      = sz > 3 and 2 or 1
-    stroke.Transparency   = 0.3
-    stars[i] = {
-        frame     = s,  stroke = stroke,
-        speed     = 0.010 + math.random() * 0.018,
-        yBase     = math.random() * 0.90,
-        phase     = math.random() * math.pi * 2,
-        glowT     = math.random() * math.pi * 2,
-        glowSpeed = 0.4 + math.random() * 0.8,
-    }
+    local st = Instance.new("UIStroke", s)
+    st.Color = Theme.Purple
+    st.Thickness = sz > 3 and 2 or 1
+    st.Transparency = 0.3
+    stars[i] = {f=s, st=st, spd=0.01+math.random()*0.018, yb=math.random()*0.9,
+                ph=math.random()*math.pi*2, gt=math.random()*math.pi*2, gs=0.4+math.random()*0.8}
 end
-
 RunService.Heartbeat:Connect(function()
     if not Main.Visible then return end
     local t = tick()
     for _, d in ipairs(stars) do
-        local x    = ((t * d.speed + d.phase) % 2.5) - 0.7
-        local y    = d.yBase + math.sin(t * 0.7 + d.phase) * 0.055
-        d.frame.Position = UDim2.new(x, 0, y, 0)
-        local glow = math.sin(t * d.glowSpeed + d.glowT)
-        d.frame.BackgroundTransparency = 0.05 + (glow * 0.5 + 0.5) * 0.55
-        d.stroke.Transparency          = 0.1 + (1 - (glow * 0.5 + 0.5)) * 0.65
+        d.f.Position = UDim2.new(((t*d.spd+d.ph)%2.5)-0.7, 0, d.yb+math.sin(t*0.7+d.ph)*0.055, 0)
+        local g = math.sin(t*d.gs+d.gt)
+        d.f.BackgroundTransparency = 0.05+(g*0.5+0.5)*0.55
+        d.st.Transparency = 0.1+(1-(g*0.5+0.5))*0.65
     end
 end)
 
--- =========================================================
--- HEADER
--- =========================================================
+-- Header
 local Header = Instance.new("Frame", Main)
-Header.Size             = UDim2.new(1, 0, 0, 60)
+Header.Size = UDim2.new(1,0,0,60)
 Header.BackgroundColor3 = Theme.Header
-Header.BorderSizePixel  = 0
-Header.ZIndex           = 5
-
-local HeaderLine = Instance.new("Frame", Header)
-HeaderLine.Size             = UDim2.new(1, 0, 0, 1)
-HeaderLine.Position         = UDim2.new(0, 0, 1, -1)
-HeaderLine.BackgroundColor3 = Theme.Border
-HeaderLine.BorderSizePixel  = 0
-HeaderLine.ZIndex           = 5
-
+Header.BorderSizePixel = 0
+Header.ZIndex = 5
+local HLine = Instance.new("Frame", Header)
+HLine.Size = UDim2.new(1,0,0,1)
+HLine.Position = UDim2.new(0,0,1,-1)
+HLine.BackgroundColor3 = Theme.Border
+HLine.BorderSizePixel = 0
+HLine.ZIndex = 5
 local Title = Instance.new("TextLabel", Header)
-Title.Text            = "MrCalvoHub"
-Title.Font            = Enum.Font.GothamBlack
-Title.TextSize        = 28
-Title.TextColor3      = Theme.Text
-Title.Size            = UDim2.new(0, 260, 1, 0)
-Title.Position        = UDim2.new(0, 24, 0, 0)
+Title.Text = "MrCalvoHub"
+Title.Font = Enum.Font.GothamBlack
+Title.TextSize = 28
+Title.TextColor3 = Theme.Text
+Title.Size = UDim2.new(0,260,1,0)
+Title.Position = UDim2.new(0,24,0,0)
 Title.BackgroundTransparency = 1
-Title.TextXAlignment  = Enum.TextXAlignment.Left
-Title.ZIndex          = 6
-local TitleGrad = Instance.new("UIGradient", Title)
-TitleGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 255, 255)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 160, 255)),
-    ColorSequenceKeypoint.new(1,   Theme.Purple),
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.ZIndex = 6
+local TG = Instance.new("UIGradient", Title)
+TG.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255,255,255)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200,160,255)),
+    ColorSequenceKeypoint.new(1, Theme.Purple)
 })
 
-local function MakeHeaderBtn(text, offsetX)
-    local btn = Instance.new("TextButton", Header)
-    btn.Size             = UDim2.new(0, 34, 0, 34)
-    btn.Position         = UDim2.new(1, offsetX, 0.5, 0)
-    btn.AnchorPoint      = Vector2.new(0, 0.5)
-    btn.BackgroundColor3 = Color3.fromRGB(30, 26, 46)
-    btn.Text             = text
-    btn.TextColor3       = Theme.TextMuted
-    btn.Font             = Enum.Font.GothamBold
-    btn.TextSize         = 16
-    btn.BorderSizePixel  = 0
-    btn.ZIndex           = 7
-    btn.AutoButtonColor  = false
-    ApplyCorner(btn, 10)
-    ApplyStroke(btn, Theme.Border, 1)
-    btn.MouseEnter:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(46,34,72), TextColor3 = Theme.Text}):Play()
-    end)
-    btn.MouseLeave:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(30,26,46), TextColor3 = Theme.TextMuted}):Play()
-    end)
-    return btn
+local function MakeHBtn(text, ox)
+    local b = Instance.new("TextButton", Header)
+    b.Size = UDim2.new(0,34,0,34)
+    b.Position = UDim2.new(1,ox,0.5,0)
+    b.AnchorPoint = Vector2.new(0,0.5)
+    b.BackgroundColor3 = Color3.fromRGB(30,26,46)
+    b.Text = text; b.TextColor3 = Theme.TextMuted
+    b.Font = Enum.Font.GothamBold; b.TextSize = 16
+    b.BorderSizePixel = 0; b.ZIndex = 7; b.AutoButtonColor = false
+    ApplyCorner(b,10); ApplyStroke(b, Theme.Border, 1)
+    b.MouseEnter:Connect(function() TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3=Color3.fromRGB(46,34,72), TextColor3=Theme.Text}):Play() end)
+    b.MouseLeave:Connect(function() TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3=Color3.fromRGB(30,26,46), TextColor3=Theme.TextMuted}):Play() end)
+    return b
 end
+local MinBtn   = MakeHBtn("−", -82)
+local CloseBtn = MakeHBtn("✕", -44)
 
-local MinimizeBtn = MakeHeaderBtn("−", -82)
-local CloseBtn    = MakeHeaderBtn("✕", -44)
+local MiniPill = Instance.new("TextButton", ScreenGui)
+MiniPill.Text="MrCalvoHub"; MiniPill.Font=Enum.Font.GothamBold; MiniPill.TextSize=13
+MiniPill.TextColor3=Theme.Text; MiniPill.Size=UDim2.new(0,118,0,32); MiniPill.Position=UDim2.new(0.5,-59,0,14)
+MiniPill.BackgroundColor3=Theme.Purple; MiniPill.Visible=false; MiniPill.ZIndex=10
+ApplyCorner(MiniPill,10)
+local MG = Instance.new("UIGradient", MiniPill)
+MG.Color = ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
 
-local MinimizedBtn = Instance.new("TextButton", ScreenGui)
-MinimizedBtn.Text            = "MrCalvoHub"
-MinimizedBtn.Font            = Enum.Font.GothamBold
-MinimizedBtn.TextSize        = 13
-MinimizedBtn.TextColor3      = Theme.Text
-MinimizedBtn.Size            = UDim2.new(0, 118, 0, 32)
-MinimizedBtn.Position        = UDim2.new(0.5, -59, 0, 14)
-MinimizedBtn.BackgroundColor3 = Theme.Purple
-MinimizedBtn.Visible         = false
-MinimizedBtn.ZIndex          = 10
-ApplyCorner(MinimizedBtn, 10)
-local MinGrad = Instance.new("UIGradient", MinimizedBtn)
-MinGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Theme.Purple),
-    ColorSequenceKeypoint.new(1, Theme.PurpleLight),
-})
-
-MinimizeBtn.MouseButton1Click:Connect(function() HideMain(function() MinimizedBtn.Visible = true end) end)
-MinimizedBtn.MouseButton1Click:Connect(function() MinimizedBtn.Visible = false ShowMain() end)
+MinBtn.MouseButton1Click:Connect(function() HideMain(function() MiniPill.Visible=true end) end)
+MiniPill.MouseButton1Click:Connect(function() MiniPill.Visible=false ShowMain() end)
 CloseBtn.MouseButton1Click:Connect(function() HideMain(function() ScreenGui:Destroy() end) end)
 
-local dragData = {}
+local dragD = {}
 Header.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragData.active = true dragData.start = i.Position dragData.pos = Main.Position
+        dragD.on=true; dragD.s=i.Position; dragD.p=Main.Position
     end
 end)
 UserInputService.InputChanged:Connect(function(i)
-    if dragData.active and i.UserInputType == Enum.UserInputType.MouseMovement then
-        local d = i.Position - dragData.start
-        Main.Position = UDim2.new(dragData.pos.X.Scale, dragData.pos.X.Offset + d.X,
-                                   dragData.pos.Y.Scale, dragData.pos.Y.Offset + d.Y)
+    if dragD.on and i.UserInputType == Enum.UserInputType.MouseMovement then
+        local d = i.Position - dragD.s
+        Main.Position = UDim2.new(dragD.p.X.Scale, dragD.p.X.Offset+d.X, dragD.p.Y.Scale, dragD.p.Y.Offset+d.Y)
     end
 end)
 UserInputService.InputEnded:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 then dragData.active = false end
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then dragD.on=false end
 end)
 
--- =========================================================
--- SIDEBAR
--- =========================================================
+-- Sidebar
 local Sidebar = Instance.new("Frame", Main)
-Sidebar.Size             = UDim2.new(0, 170, 1, -62)
-Sidebar.Position         = UDim2.new(0, 0, 0, 61)
+Sidebar.Size = UDim2.new(0,170,1,-62)
+Sidebar.Position = UDim2.new(0,0,0,61)
 Sidebar.BackgroundColor3 = Theme.Sidebar
-Sidebar.BorderSizePixel  = 0
-Sidebar.ZIndex           = 4
-
-local SidebarLine = Instance.new("Frame", Sidebar)
-SidebarLine.Size             = UDim2.new(0, 1, 1, 0)
-SidebarLine.Position         = UDim2.new(1, -1, 0, 0)
-SidebarLine.BackgroundColor3 = Theme.Border
-SidebarLine.BorderSizePixel  = 0
+Sidebar.BorderSizePixel = 0; Sidebar.ZIndex = 4
+local SL = Instance.new("Frame", Sidebar)
+SL.Size=UDim2.new(0,1,1,0); SL.Position=UDim2.new(1,-1,0,0)
+SL.BackgroundColor3=Theme.Border; SL.BorderSizePixel=0
 
 local function CreateNavBtn(icon, label, yPos, active)
     local btn = Instance.new("TextButton", Sidebar)
-    btn.Size                = UDim2.new(1, -24, 0, 42)
-    btn.Position            = UDim2.new(0, 12, 0, yPos)
-    btn.Text                = ""
-    btn.AutoButtonColor     = false
-    btn.BackgroundColor3    = Theme.Purple
+    btn.Size = UDim2.new(1,-24,0,42)
+    btn.Position = UDim2.new(0,12,0,yPos)
+    btn.Text=""; btn.AutoButtonColor=false
+    btn.BackgroundColor3=Theme.Purple
     btn.BackgroundTransparency = active and 0 or 1
-    btn.BorderSizePixel     = 0
-    btn.ZIndex              = 6
-    ApplyCorner(btn, 10)
+    btn.BorderSizePixel=0; btn.ZIndex=6
+    ApplyCorner(btn,10)
     if active then
-        local g = Instance.new("UIGradient", btn)
-        g.Color    = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.Purple), ColorSequenceKeypoint.new(1, Theme.PurpleLight)})
-        g.Rotation = 135
+        local g=Instance.new("UIGradient",btn)
+        g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
+        g.Rotation=135
     end
-    local iconL = Instance.new("TextLabel", btn)
-    iconL.Text  = icon  iconL.TextSize = 17  iconL.Font = Enum.Font.GothamBold
-    iconL.TextColor3 = active and Theme.Text or Theme.TextDim
-    iconL.BackgroundTransparency = 1
-    iconL.Size = UDim2.new(0, 30, 1, 0)  iconL.Position = UDim2.new(0, 10, 0, 0)
-    iconL.TextXAlignment = Enum.TextXAlignment.Center  iconL.TextYAlignment = Enum.TextYAlignment.Center  iconL.ZIndex = 7
-    local textL = Instance.new("TextLabel", btn)
-    textL.Text = label  textL.TextSize = 14  textL.Font = Enum.Font.GothamSemibold
-    textL.TextColor3 = active and Theme.Text or Theme.TextMuted
-    textL.BackgroundTransparency = 1
-    textL.Size = UDim2.new(1, -46, 1, 0)  textL.Position = UDim2.new(0, 42, 0, 0)
-    textL.TextXAlignment = Enum.TextXAlignment.Left  textL.TextYAlignment = Enum.TextYAlignment.Center  textL.ZIndex = 7
+    local ic=Instance.new("TextLabel",btn); ic.Text=icon; ic.TextSize=17; ic.Font=Enum.Font.GothamBold
+    ic.TextColor3=active and Theme.Text or Theme.TextDim; ic.BackgroundTransparency=1
+    ic.Size=UDim2.new(0,30,1,0); ic.Position=UDim2.new(0,10,0,0)
+    ic.TextXAlignment=Enum.TextXAlignment.Center; ic.TextYAlignment=Enum.TextYAlignment.Center; ic.ZIndex=7
+    local tx=Instance.new("TextLabel",btn); tx.Text=label; tx.TextSize=14; tx.Font=Enum.Font.GothamSemibold
+    tx.TextColor3=active and Theme.Text or Theme.TextMuted; tx.BackgroundTransparency=1
+    tx.Size=UDim2.new(1,-46,1,0); tx.Position=UDim2.new(0,42,0,0)
+    tx.TextXAlignment=Enum.TextXAlignment.Left; tx.TextYAlignment=Enum.TextYAlignment.Center; tx.ZIndex=7
     btn.MouseEnter:Connect(function()
-        if btn.BackgroundTransparency > 0.5 then
-            TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundTransparency = 0.7}):Play()
-        end
+        if btn.BackgroundTransparency > 0.5 then TweenService:Create(btn,TweenInfo.new(0.15),{BackgroundTransparency=0.7}):Play() end
     end)
     btn.MouseLeave:Connect(function()
-        if btn.BackgroundTransparency > 0.1 then
-            TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
-        end
+        if btn.BackgroundTransparency > 0.1 then TweenService:Create(btn,TweenInfo.new(0.15),{BackgroundTransparency=1}):Play() end
     end)
-    return btn, iconL, textL
+    return btn, ic, tx
 end
 
-local MoveBtn, MoveBtnIcon, MoveBtnText = CreateNavBtn("🏃", "Movement",  14, true)
-local EvoBtn,  EvoBtnIcon,  EvoBtnText  = CreateNavBtn("🐾", "Evomon",    62, false)
-local UtilBtn, UtilBtnIcon, UtilBtnText = CreateNavBtn("⚡", "Utilities", 110, false)
+local MoveBtn, MBI, MBT = CreateNavBtn("🏃","Movement", 14, true)
+local EvoBtn,  EBI, EBT = CreateNavBtn("🐾","Evomon",   62, false)
+local UtilBtn, UBI, UBT = CreateNavBtn("⚡","Utilities",110, false)
 
--- =========================================================
--- CONTENT AREA
--- =========================================================
+-- Content area
 local ContentArea = Instance.new("Frame", Main)
-ContentArea.Size             = UDim2.new(1, -182, 1, -68)
-ContentArea.Position         = UDim2.new(0, 178, 0, 65)
-ContentArea.BackgroundTransparency = 1
-ContentArea.ZIndex           = 4
-ContentArea.ClipsDescendants = true
+ContentArea.Size=UDim2.new(1,-182,1,-68); ContentArea.Position=UDim2.new(0,178,0,65)
+ContentArea.BackgroundTransparency=1; ContentArea.ZIndex=4; ContentArea.ClipsDescendants=true
 
-local function MakeScroll(visible)
-    local s = Instance.new("ScrollingFrame", ContentArea)
-    s.Size                    = UDim2.new(1, 0, 1, 0)
-    s.BackgroundTransparency  = 1
-    s.ScrollBarThickness      = 4
-    s.ScrollBarImageColor3    = Theme.Purple
-    s.ScrollBarImageTransparency = 0.4
-    s.Visible                 = visible
-    s.AutomaticCanvasSize     = Enum.AutomaticSize.Y
-    s.BorderSizePixel         = 0
-    s.ZIndex                  = 5
-    local layout = Instance.new("UIListLayout", s)
-    layout.Padding   = UDim.new(0, 16)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    local pad = Instance.new("UIPadding", s)
-    pad.PaddingLeft   = UDim.new(0, 4)
-    pad.PaddingRight  = UDim.new(0, 14)
-    pad.PaddingTop    = UDim.new(0, 6)
-    pad.PaddingBottom = UDim.new(0, 16)
+local function MakeScroll(vis)
+    local s=Instance.new("ScrollingFrame",ContentArea)
+    s.Size=UDim2.new(1,0,1,0); s.BackgroundTransparency=1
+    s.ScrollBarThickness=4; s.ScrollBarImageColor3=Theme.Purple
+    s.ScrollBarImageTransparency=0.4; s.Visible=vis
+    s.AutomaticCanvasSize=Enum.AutomaticSize.Y; s.BorderSizePixel=0; s.ZIndex=5
+    local ly=Instance.new("UIListLayout",s); ly.Padding=UDim.new(0,16); ly.SortOrder=Enum.SortOrder.LayoutOrder
+    local pd=Instance.new("UIPadding",s)
+    pd.PaddingLeft=UDim.new(0,4); pd.PaddingRight=UDim.new(0,14)
+    pd.PaddingTop=UDim.new(0,6); pd.PaddingBottom=UDim.new(0,16)
     return s
 end
 
@@ -986,758 +847,464 @@ local ScrollMove = MakeScroll(true)
 local ScrollEvo  = MakeScroll(false)
 local ScrollUtil = MakeScroll(false)
 
-local function SetActiveNav(tab)
-    local function activate(btn, icon, text, on)
-        local g = btn:FindFirstChildOfClass("UIGradient")
+local function SetNav(tab)
+    local function act(btn,ic,tx,on)
+        local g=btn:FindFirstChildOfClass("UIGradient")
         if on then
-            btn.BackgroundTransparency = 0
-            btn.BackgroundColor3       = Theme.Purple
+            btn.BackgroundTransparency=0; btn.BackgroundColor3=Theme.Purple
             if not g then
-                g = Instance.new("UIGradient", btn)
-                g.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.Purple), ColorSequenceKeypoint.new(1, Theme.PurpleLight)})
-                g.Rotation = 135
+                g=Instance.new("UIGradient",btn)
+                g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
+                g.Rotation=135
             end
-            icon.TextColor3 = Theme.Text  text.TextColor3 = Theme.Text
+            ic.TextColor3=Theme.Text; tx.TextColor3=Theme.Text
         else
-            btn.BackgroundTransparency = 1
-            if g then g:Destroy() end
-            icon.TextColor3 = Theme.TextDim  text.TextColor3 = Theme.TextMuted
+            btn.BackgroundTransparency=1; if g then g:Destroy() end
+            ic.TextColor3=Theme.TextDim; tx.TextColor3=Theme.TextMuted
         end
     end
-    activate(MoveBtn, MoveBtnIcon, MoveBtnText, tab == "move")
-    activate(EvoBtn,  EvoBtnIcon,  EvoBtnText,  tab == "evo")
-    activate(UtilBtn, UtilBtnIcon, UtilBtnText, tab == "util")
-    ScrollMove.Visible = (tab == "move")
-    ScrollEvo.Visible  = (tab == "evo")
-    ScrollUtil.Visible = (tab == "util")
+    act(MoveBtn,MBI,MBT, tab=="move")
+    act(EvoBtn, EBI,EBT, tab=="evo")
+    act(UtilBtn,UBI,UBT, tab=="util")
+    ScrollMove.Visible=(tab=="move")
+    ScrollEvo.Visible=(tab=="evo")
+    ScrollUtil.Visible=(tab=="util")
 end
 
-MoveBtn.MouseButton1Click:Connect(function() SetActiveNav("move") end)
-EvoBtn.MouseButton1Click:Connect(function()  SetActiveNav("evo")  end)
-UtilBtn.MouseButton1Click:Connect(function() SetActiveNav("util") end)
+MoveBtn.MouseButton1Click:Connect(function() SetNav("move") end)
+EvoBtn.MouseButton1Click:Connect(function()  SetNav("evo")  end)
+UtilBtn.MouseButton1Click:Connect(function() SetNav("util") end)
 
--- =========================================================
--- CARD / TOGGLE / SLIDER helpers
--- =========================================================
+-- Card/Toggle/Slider helpers
 local function MakeCard(parent, order)
-    local card = Instance.new("Frame", parent)
-    card.BackgroundColor3 = Theme.Card
-    card.BorderSizePixel  = 0
-    card.AutomaticSize    = Enum.AutomaticSize.Y
-    card.Size             = UDim2.new(1, 0, 0, 0)
-    card.LayoutOrder      = order or 0
-    card.ZIndex           = 6
-    ApplyCorner(card, 14)
-    ApplyStroke(card, Theme.Border, 1)
-    local layout = Instance.new("UIListLayout", card)
-    layout.Padding   = UDim.new(0, 0)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    local pad = Instance.new("UIPadding", card)
-    pad.PaddingLeft   = UDim.new(0, 18)
-    pad.PaddingRight  = UDim.new(0, 18)
-    pad.PaddingTop    = UDim.new(0, 14)
-    pad.PaddingBottom = UDim.new(0, 14)
-    return card
+    local c=Instance.new("Frame",parent)
+    c.BackgroundColor3=Theme.Card; c.BorderSizePixel=0
+    c.AutomaticSize=Enum.AutomaticSize.Y; c.Size=UDim2.new(1,0,0,0)
+    c.LayoutOrder=order or 0; c.ZIndex=6
+    ApplyCorner(c,14); ApplyStroke(c,Theme.Border,1)
+    local ly=Instance.new("UIListLayout",c); ly.Padding=UDim.new(0,0); ly.SortOrder=Enum.SortOrder.LayoutOrder
+    local pd=Instance.new("UIPadding",c)
+    pd.PaddingLeft=UDim.new(0,18); pd.PaddingRight=UDim.new(0,18)
+    pd.PaddingTop=UDim.new(0,14); pd.PaddingBottom=UDim.new(0,14)
+    return c
 end
 
 local function MakeCardTitle(card, text)
-    local f = Instance.new("Frame", card)
-    f.Size             = UDim2.new(1, 0, 0, 32)
-    f.BackgroundTransparency = 1
-    f.LayoutOrder      = 0
-    f.ZIndex           = 7
-    local lbl = MakeLabel(f, text, 11, Theme.Purple, Enum.Font.GothamBold)
-    lbl.Size  = UDim2.new(1, 0, 1, 0)
-    lbl.ZIndex = 7
-    local line = Instance.new("Frame", f)
-    line.Size             = UDim2.new(1, 0, 0, 1)
-    line.Position         = UDim2.new(0, 0, 1, -1)
-    line.BackgroundColor3 = Theme.Border
-    line.BorderSizePixel  = 0
-    line.ZIndex           = 7
+    local f=Instance.new("Frame",card); f.Size=UDim2.new(1,0,0,32)
+    f.BackgroundTransparency=1; f.LayoutOrder=0; f.ZIndex=7
+    local l=MakeLabel(f,text,11,Theme.Purple,Enum.Font.GothamBold); l.Size=UDim2.new(1,0,1,0); l.ZIndex=7
+    local ln=Instance.new("Frame",f); ln.Size=UDim2.new(1,0,0,1); ln.Position=UDim2.new(0,0,1,-1)
+    ln.BackgroundColor3=Theme.Border; ln.BorderSizePixel=0; ln.ZIndex=7
 end
 
-local rowOrder = 0
-local function NextOrder() rowOrder += 1 return rowOrder end
+local rowO = 0
+local function NxtO() rowO+=1 return rowO end
 
 local function MakeToggle(parent, labelText, default, callback, order)
-    local row = Instance.new("Frame", parent)
-    row.Size             = UDim2.new(1, 0, 0, 44)
-    row.BackgroundTransparency = 1
-    row.LayoutOrder      = order or NextOrder()
-    row.ZIndex           = 7
-
-    local lbl = MakeLabel(row, labelText, 14, Theme.TextMuted)
-    lbl.Size     = UDim2.new(1, -62, 1, 0)
-    lbl.Position = UDim2.new(0, 0, 0, 0)
-    lbl.ZIndex   = 8
-
-    local track = Instance.new("Frame", row)
-    track.Size             = UDim2.new(0, 44, 0, 24)
-    track.Position         = UDim2.new(1, -44, 0.5, 0)
-    track.AnchorPoint      = Vector2.new(0, 0.5)
-    track.BackgroundColor3 = default and Theme.Purple or Theme.ToggleOff
-    track.BorderSizePixel  = 0
-    track.ZIndex           = 8
-    ApplyCorner(track, 12)
+    local row=Instance.new("Frame",parent)
+    row.Size=UDim2.new(1,0,0,44); row.BackgroundTransparency=1
+    row.LayoutOrder=order or NxtO(); row.ZIndex=7
+    local lb=MakeLabel(row,labelText,14,Theme.TextMuted)
+    lb.Size=UDim2.new(1,-62,1,0); lb.Position=UDim2.new(0,0,0,0); lb.ZIndex=8
+    local tr=Instance.new("Frame",row)
+    tr.Size=UDim2.new(0,44,0,24); tr.Position=UDim2.new(1,-44,0.5,0)
+    tr.AnchorPoint=Vector2.new(0,0.5); tr.BackgroundColor3=default and Theme.Purple or Theme.ToggleOff
+    tr.BorderSizePixel=0; tr.ZIndex=8; ApplyCorner(tr,12)
     if default then
-        local g = Instance.new("UIGradient", track)
-        g.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.Purple), ColorSequenceKeypoint.new(1, Theme.PurpleLight)})
+        local g=Instance.new("UIGradient",tr)
+        g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
     end
-
-    local knob = Instance.new("Frame", track)
-    knob.Size             = UDim2.new(0, 18, 0, 18)
-    knob.Position         = default and UDim2.new(1, -21, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
-    knob.AnchorPoint      = Vector2.new(0, 0.5)
-    knob.BackgroundColor3 = Color3.new(1, 1, 1)
-    knob.BorderSizePixel  = 0
-    knob.ZIndex           = 9
-    ApplyCorner(knob, 9)
-
-    local state = default
-    local function doToggle()
-        state = not state
-        callback(state)
-        local grad = track:FindFirstChildOfClass("UIGradient")
+    local kn=Instance.new("Frame",tr)
+    kn.Size=UDim2.new(0,18,0,18)
+    kn.Position=default and UDim2.new(1,-21,0.5,0) or UDim2.new(0,3,0.5,0)
+    kn.AnchorPoint=Vector2.new(0,0.5); kn.BackgroundColor3=Color3.new(1,1,1)
+    kn.BorderSizePixel=0; kn.ZIndex=9; ApplyCorner(kn,9)
+    local state=default
+    local function doT()
+        state=not state; callback(state)
+        local g=tr:FindFirstChildOfClass("UIGradient")
         if state then
-            if not grad then
-                grad = Instance.new("UIGradient", track)
-                grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.Purple), ColorSequenceKeypoint.new(1, Theme.PurpleLight)})
+            if not g then
+                g=Instance.new("UIGradient",tr)
+                g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
             end
-        else
-            if grad then grad:Destroy() end
-        end
-        TweenService:Create(track, TweenInfo.new(0.18), {BackgroundColor3 = state and Theme.Purple or Theme.ToggleOff}):Play()
-        TweenService:Create(knob,  TweenInfo.new(0.2, Enum.EasingStyle.Quint), {Position = state and UDim2.new(1,-21,0.5,0) or UDim2.new(0,3,0.5,0)}):Play()
+        else if g then g:Destroy() end end
+        TweenService:Create(tr,TweenInfo.new(0.18),{BackgroundColor3=state and Theme.Purple or Theme.ToggleOff}):Play()
+        TweenService:Create(kn,TweenInfo.new(0.2,Enum.EasingStyle.Quint),{Position=state and UDim2.new(1,-21,0.5,0) or UDim2.new(0,3,0.5,0)}):Play()
     end
-
-    local hitBtn = Instance.new("TextButton", row)
-    hitBtn.Size             = UDim2.new(1, 0, 1, 0)
-    hitBtn.BackgroundTransparency = 1
-    hitBtn.Text             = ""
-    hitBtn.ZIndex           = 10
-    hitBtn.AutoButtonColor  = false
-    hitBtn.MouseButton1Click:Connect(doToggle)
+    local hit=Instance.new("TextButton",row)
+    hit.Size=UDim2.new(1,0,1,0); hit.BackgroundTransparency=1
+    hit.Text=""; hit.ZIndex=10; hit.AutoButtonColor=false
+    hit.MouseButton1Click:Connect(doT)
     return row
 end
 
 local function MakeSlider(parent, labelText, minV, maxV, default, callback, order)
-    local f = Instance.new("Frame", parent)
-    f.Size             = UDim2.new(1, 0, 0, 54)
-    f.BackgroundTransparency = 1
-    f.LayoutOrder      = order or NextOrder()
-    f.ZIndex           = 7
-
-    local hRow = Instance.new("Frame", f)
-    hRow.Size             = UDim2.new(1, 0, 0, 22)
-    hRow.BackgroundTransparency = 1
-    hRow.ZIndex           = 8
-
-    local lbl = MakeLabel(hRow, labelText, 13, Theme.TextMuted)
-    lbl.Size  = UDim2.new(1, -50, 1, 0)
-    lbl.ZIndex = 8
-
-    local valLbl = MakeLabel(hRow, tostring(default), 13, Theme.PurpleLight, Enum.Font.GothamBold, Enum.TextXAlignment.Right)
-    valLbl.Size     = UDim2.new(0, 48, 1, 0)
-    valLbl.Position = UDim2.new(1, -48, 0, 0)
-    valLbl.ZIndex   = 8
-
-    local barBG = Instance.new("Frame", f)
-    barBG.Size             = UDim2.new(1, 0, 0, 6)
-    barBG.Position         = UDim2.new(0, 0, 0, 34)
-    barBG.BackgroundColor3 = Theme.SliderBG
-    barBG.BorderSizePixel  = 0
-    barBG.ZIndex           = 8
-    ApplyCorner(barBG, 3)
-
-    local fill = Instance.new("Frame", barBG)
-    fill.BackgroundColor3 = Theme.Purple
-    fill.Size             = UDim2.new((default - minV) / (maxV - minV), 0, 1, 0)
-    fill.BorderSizePixel  = 0
-    fill.ZIndex           = 9
-    ApplyCorner(fill, 3)
-    local fg = Instance.new("UIGradient", fill)
-    fg.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.Purple), ColorSequenceKeypoint.new(1, Theme.PurpleLight)})
-
-    local knob = Instance.new("Frame", barBG)
-    knob.Size             = UDim2.new(0, 14, 0, 14)
-    knob.Position         = UDim2.new((default - minV) / (maxV - minV), -7, 0.5, 0)
-    knob.AnchorPoint      = Vector2.new(0, 0.5)
-    knob.BackgroundColor3 = Color3.new(1, 1, 1)
-    knob.BorderSizePixel  = 0
-    knob.ZIndex           = 10
-    ApplyCorner(knob, 7)
-    ApplyStroke(knob, Theme.Purple, 2)
-
-    local dragging = false
-    local function updateSlider(inputPos)
-        local rel = math.clamp((inputPos.X - barBG.AbsolutePosition.X) / barBG.AbsoluteSize.X, 0, 1)
-        local val = math.floor(minV + (maxV - minV) * rel + 0.5)
-        fill.Size     = UDim2.new(rel, 0, 1, 0)
-        knob.Position = UDim2.new(rel, -7, 0.5, 0)
-        valLbl.Text   = tostring(val)
-        callback(val)
+    local f=Instance.new("Frame",parent)
+    f.Size=UDim2.new(1,0,0,54); f.BackgroundTransparency=1
+    f.LayoutOrder=order or NxtO(); f.ZIndex=7
+    local hr=Instance.new("Frame",f); hr.Size=UDim2.new(1,0,0,22); hr.BackgroundTransparency=1; hr.ZIndex=8
+    local lb=MakeLabel(hr,labelText,13,Theme.TextMuted); lb.Size=UDim2.new(1,-50,1,0); lb.ZIndex=8
+    local vl=MakeLabel(hr,tostring(default),13,Theme.PurpleLight,Enum.Font.GothamBold,Enum.TextXAlignment.Right)
+    vl.Size=UDim2.new(0,48,1,0); vl.Position=UDim2.new(1,-48,0,0); vl.ZIndex=8
+    local bg=Instance.new("Frame",f); bg.Size=UDim2.new(1,0,0,6); bg.Position=UDim2.new(0,0,0,34)
+    bg.BackgroundColor3=Theme.SliderBG; bg.BorderSizePixel=0; bg.ZIndex=8; ApplyCorner(bg,3)
+    local fl=Instance.new("Frame",bg); fl.BackgroundColor3=Theme.Purple
+    fl.Size=UDim2.new((default-minV)/(maxV-minV),0,1,0); fl.BorderSizePixel=0; fl.ZIndex=9; ApplyCorner(fl,3)
+    local fg=Instance.new("UIGradient",fl)
+    fg.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
+    local kn=Instance.new("Frame",bg); kn.Size=UDim2.new(0,14,0,14)
+    kn.Position=UDim2.new((default-minV)/(maxV-minV),-7,0.5,0); kn.AnchorPoint=Vector2.new(0,0.5)
+    kn.BackgroundColor3=Color3.new(1,1,1); kn.BorderSizePixel=0; kn.ZIndex=10
+    ApplyCorner(kn,7); ApplyStroke(kn,Theme.Purple,2)
+    local drag=false
+    local function upd(pos)
+        local rel=math.clamp((pos.X-bg.AbsolutePosition.X)/bg.AbsoluteSize.X,0,1)
+        local val=math.floor(minV+(maxV-minV)*rel+0.5)
+        fl.Size=UDim2.new(rel,0,1,0); kn.Position=UDim2.new(rel,-7,0.5,0)
+        vl.Text=tostring(val); callback(val)
     end
-
-    knob.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end end)
-    barBG.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true updateSlider(i.Position) end end)
-    UserInputService.InputEnded:Connect(function(i)   if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
-    UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then updateSlider(i.Position) end end)
+    kn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true end end)
+    bg.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true upd(i.Position) end end)
+    UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end end)
+    UserInputService.InputChanged:Connect(function(i) if drag and i.UserInputType==Enum.UserInputType.MouseMovement then upd(i.Position) end end)
     return f
+end
+
+-- Purple button helper
+local function MakePurpleBtn(parent, text, order)
+    local wrap=Instance.new("Frame",parent)
+    wrap.Size=UDim2.new(1,0,0,50); wrap.BackgroundTransparency=1; wrap.LayoutOrder=order or NxtO()
+    local btn=Instance.new("TextButton",wrap)
+    btn.Size=UDim2.new(1,0,0,38); btn.Position=UDim2.new(0,0,0,6)
+    btn.BackgroundColor3=Theme.Purple; btn.Text=text
+    btn.Font=Enum.Font.GothamBold; btn.TextSize=14; btn.TextColor3=Theme.Text
+    btn.BorderSizePixel=0; btn.ZIndex=8; btn.AutoButtonColor=false; ApplyCorner(btn,10)
+    local g=Instance.new("UIGradient",btn)
+    g.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
+    g.Rotation=90
+    btn.MouseEnter:Connect(function() TweenService:Create(btn,TweenInfo.new(0.15),{BackgroundColor3=Theme.PurpleLight}):Play() end)
+    btn.MouseLeave:Connect(function() TweenService:Create(btn,TweenInfo.new(0.15),{BackgroundColor3=Theme.Purple}):Play() end)
+    return btn, wrap
+end
+
+local function MakeDarkBtn(parent, text, order)
+    local wrap=Instance.new("Frame",parent)
+    wrap.Size=UDim2.new(1,0,0,48); wrap.BackgroundTransparency=1; wrap.LayoutOrder=order or NxtO()
+    local btn=Instance.new("TextButton",wrap)
+    btn.Size=UDim2.new(1,0,0,36); btn.Position=UDim2.new(0,0,0,6)
+    btn.BackgroundColor3=Color3.fromRGB(40,30,65); btn.Text=text
+    btn.Font=Enum.Font.GothamSemibold; btn.TextSize=13; btn.TextColor3=Theme.TextMuted
+    btn.BorderSizePixel=0; btn.ZIndex=8; btn.AutoButtonColor=false
+    ApplyCorner(btn,10); ApplyStroke(btn,Theme.Border,1)
+    btn.MouseEnter:Connect(function() TweenService:Create(btn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(60,44,90),TextColor3=Theme.Text}):Play() end)
+    btn.MouseLeave:Connect(function() TweenService:Create(btn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(40,30,65),TextColor3=Theme.TextMuted}):Play() end)
+    return btn, wrap
 end
 
 -- =========================================================
 -- MOVEMENT TAB
 -- =========================================================
-local CardLoco = MakeCard(ScrollMove, 1)
-MakeCardTitle(CardLoco, "LOCOMOTION")
-MakeToggle(CardLoco, "Speed",   States.SpeedEnabled,   function(v) States.SpeedEnabled = v end)
-MakeSlider(CardLoco, "Speed Value", 16, 300, 50,       function(v) States.SpeedValue   = v end)
-MakeToggle(CardLoco, "Fly",     States.FlyEnabled,     function(v) States.FlyEnabled   = v end)
-MakeSlider(CardLoco, "Fly Speed",   10, 300, 50,       function(v) States.FlySpeed     = v end)
-MakeToggle(CardLoco, "Noclip", States.NoclipEnabled,   function(v) States.NoclipEnabled = v end)
+local CL=MakeCard(ScrollMove,1); MakeCardTitle(CL,"LOCOMOTION")
+MakeToggle(CL,"Speed",States.SpeedEnabled,function(v) States.SpeedEnabled=v SaveConfig() end)
+MakeSlider(CL,"Speed Value",16,300,States.SpeedValue,function(v) States.SpeedValue=v end)
+MakeToggle(CL,"Fly",States.FlyEnabled,function(v) States.FlyEnabled=v SaveConfig() end)
+MakeSlider(CL,"Fly Speed",10,300,States.FlySpeed,function(v) States.FlySpeed=v end)
+MakeToggle(CL,"Noclip",States.NoclipEnabled,function(v) States.NoclipEnabled=v SaveConfig() end)
 
-local CardAFW = MakeCard(ScrollMove, 2)
-MakeCardTitle(CardAFW, "AUTO FIGHT WALK")
-MakeToggle(CardAFW, "Auto Fight Walk", States.AutoFightWalk, function(v)
-    States.AutoFightWalk = v
+local CA=MakeCard(ScrollMove,2); MakeCardTitle(CA,"AUTO FIGHT WALK")
+MakeToggle(CA,"Auto Fight Walk",States.AutoFightWalk,function(v)
+    States.AutoFightWalk=v SaveConfig()
     if v then task.spawn(AutoFightWalkLoop) end
 end)
-MakeSlider(CardAFW, "W Duration", 1, 10, 2, function(v) States.W_Duration = v end)
-MakeSlider(CardAFW, "A Duration", 1, 10, 2, function(v) States.A_Duration = v end)
-MakeSlider(CardAFW, "S Duration", 1, 10, 2, function(v) States.S_Duration = v end)
-MakeSlider(CardAFW, "D Duration", 1, 10, 2, function(v) States.D_Duration = v end)
+MakeSlider(CA,"W Duration",1,10,States.W_Duration,function(v) States.W_Duration=v end)
+MakeSlider(CA,"A Duration",1,10,States.A_Duration,function(v) States.A_Duration=v end)
+MakeSlider(CA,"S Duration",1,10,States.S_Duration,function(v) States.S_Duration=v end)
+MakeSlider(CA,"D Duration",1,10,States.D_Duration,function(v) States.D_Duration=v end)
 
 -- =========================================================
 -- EVOMON TAB
 -- =========================================================
-local CardEngage = MakeCard(ScrollEvo, 1)
-MakeCardTitle(CardEngage, "AUTO ENGAGE")
-MakeToggle(CardEngage, "Kill Aura", States.KillAuraEnabled, function(v)
-    States.KillAuraEnabled = v
+local CE=MakeCard(ScrollEvo,1); MakeCardTitle(CE,"AUTO ENGAGE")
+MakeToggle(CE,"Kill Aura",States.KillAuraEnabled,function(v)
+    States.KillAuraEnabled=v SaveConfig()
     if v then task.spawn(KillAuraLoop) end
 end)
-MakeSlider(CardEngage, "Kill Aura Range", 10, 200, 75, function(v) States.TeleportRange = v end)
-MakeToggle(CardEngage, "Auto Spam E", States.AutoSpamEEnabled, function(v)
-    States.AutoSpamEEnabled = v
+MakeSlider(CE,"Kill Aura Range",10,200,States.TeleportRange,function(v) States.TeleportRange=v end)
+MakeToggle(CE,"Auto Spam E",States.AutoSpamEEnabled,function(v)
+    States.AutoSpamEEnabled=v SaveConfig()
     if v then task.spawn(AutoSpamELoop) end
 end)
-MakeToggle(CardEngage, "Auto Leave Battle (C Key)", States.AutoLeaveBattleEnabled, function(v)
-    States.AutoLeaveBattleEnabled = v
+MakeToggle(CE,"Auto Leave Battle (C Key)",States.AutoLeaveBattleEnabled,function(v)
+    States.AutoLeaveBattleEnabled=v SaveConfig()
     if v then task.spawn(AutoLeaveBattleLoop) end
 end)
 
-local CardWhitelist = MakeCard(ScrollEvo, 2)
-MakeCardTitle(CardWhitelist, "TARGET WHITELIST")
-MakeToggle(CardWhitelist, "Use Target Whitelist", States.WhitelistEnabled, function(v) States.WhitelistEnabled = v end)
+local CW=MakeCard(ScrollEvo,2); MakeCardTitle(CW,"TARGET WHITELIST")
+MakeToggle(CW,"Use Target Whitelist",States.WhitelistEnabled,function(v) States.WhitelistEnabled=v end)
+local WIW=Instance.new("Frame",CW); WIW.Size=UDim2.new(1,0,0,52); WIW.BackgroundTransparency=1; WIW.LayoutOrder=NxtO()
+local WI=Instance.new("TextBox",WIW); WI.Size=UDim2.new(1,0,0,40); WI.Position=UDim2.new(0,0,0,6)
+WI.BackgroundColor3=Color3.fromRGB(14,12,24); WI.PlaceholderText="Pikachu, Dragonite, 025"
+WI.PlaceholderColor3=Theme.TextDim; WI.Text=States.WhitelistString; WI.Font=Enum.Font.Gotham
+WI.TextSize=13; WI.TextColor3=Theme.Text; WI.BorderSizePixel=0; WI.ZIndex=8; WI.ClearTextOnFocus=false
+ApplyCorner(WI,10); ApplyStroke(WI,Theme.Border,1)
+local WP=Instance.new("UIPadding",WI); WP.PaddingLeft=UDim.new(0,12); WP.PaddingRight=UDim.new(0,12)
+WI.FocusLost:Connect(function() States.WhitelistString=WI.Text end)
 
-local WrapInput = Instance.new("Frame", CardWhitelist)
-WrapInput.Size             = UDim2.new(1, 0, 0, 52)
-WrapInput.BackgroundTransparency = 1
-WrapInput.LayoutOrder      = NextOrder()
-
-local WhitelistInput = Instance.new("TextBox", WrapInput)
-WhitelistInput.Size             = UDim2.new(1, 0, 0, 40)
-WhitelistInput.Position         = UDim2.new(0, 0, 0, 6)
-WhitelistInput.BackgroundColor3 = Color3.fromRGB(14, 12, 24)
-WhitelistInput.PlaceholderText  = "Pikachu, Dragonite, 025"
-WhitelistInput.PlaceholderColor3 = Theme.TextDim
-WhitelistInput.Text             = States.WhitelistString
-WhitelistInput.Font             = Enum.Font.Gotham
-WhitelistInput.TextSize         = 13
-WhitelistInput.TextColor3       = Theme.Text
-WhitelistInput.BorderSizePixel  = 0
-WhitelistInput.ZIndex           = 8
-WhitelistInput.ClearTextOnFocus = false
-ApplyCorner(WhitelistInput, 10)
-ApplyStroke(WhitelistInput, Theme.Border, 1)
-local WPad = Instance.new("UIPadding", WhitelistInput)
-WPad.PaddingLeft  = UDim.new(0, 12)
-WPad.PaddingRight = UDim.new(0, 12)
-WhitelistInput.FocusLost:Connect(function() States.WhitelistString = WhitelistInput.Text end)
-
-local WrapScan = Instance.new("Frame", CardWhitelist)
-WrapScan.Size             = UDim2.new(1, 0, 0, 52)
-WrapScan.BackgroundTransparency = 1
-WrapScan.LayoutOrder      = NextOrder()
-
-local ScanBtn = Instance.new("TextButton", WrapScan)
-ScanBtn.Size             = UDim2.new(1, 0, 0, 40)
-ScanBtn.Position         = UDim2.new(0, 0, 0, 6)
-ScanBtn.BackgroundColor3 = Theme.Purple
-ScanBtn.Text             = "Scan Nearby Evomons (F9)"
-ScanBtn.Font             = Enum.Font.GothamBold
-ScanBtn.TextSize         = 14
-ScanBtn.TextColor3       = Theme.Text
-ScanBtn.BorderSizePixel  = 0
-ScanBtn.ZIndex           = 8
-ScanBtn.AutoButtonColor  = false
-ApplyCorner(ScanBtn, 10)
-local ScanGrad = Instance.new("UIGradient", ScanBtn)
-ScanGrad.Color    = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.Purple), ColorSequenceKeypoint.new(1, Theme.PurpleLight)})
-ScanGrad.Rotation = 90
-ScanBtn.MouseEnter:Connect(function() TweenService:Create(ScanBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.PurpleLight}):Play() end)
-ScanBtn.MouseLeave:Connect(function() TweenService:Create(ScanBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Purple}):Play() end)
-ScanBtn.MouseButton1Click:Connect(function()
-    local r = GetRoot() if not r then return end
-    print("=== EVOMONS CERCANOS ===")
-    for _, o in ipairs(Workspace:GetDescendants()) do
-        if o.Name:find("Pet0_") then
-            local p = o:IsA("BasePart") and o or o:FindFirstChildWhichIsA("BasePart")
-            if p then
-                local d = math.floor((p.Position - r.Position).Magnitude)
-                if d < 200 then print(o.Name .. " | " .. d .. " studs") end
+local ScanBtn
+do
+    local b, bw = MakePurpleBtn(CW, "Scan Nearby Evomons (F9)", NxtO())
+    ScanBtn = b
+    b.MouseButton1Click:Connect(function()
+        local r=GetRoot(); if not r then return end
+        print("=== EVOMONS CERCANOS ===")
+        for _,o in ipairs(Workspace:GetDescendants()) do
+            if o.Name:find("Pet0_") then
+                local p=o:IsA("BasePart") and o or o:FindFirstChildWhichIsA("BasePart")
+                if p then
+                    local d=math.floor((p.Position-r.Position).Magnitude)
+                    if d<200 then print(o.Name.." | "..d.." studs") end
+                end
             end
         end
-    end
-end)
+    end)
+end
 
-local CardTele = MakeCard(ScrollEvo, 3)
-MakeCardTitle(CardTele, "TELEPORT SETTINGS")
-MakeToggle(CardTele, "Teleport to Pet",   States.TeleportEnabled,      function(v) States.TeleportEnabled      = v end)
-MakeSlider(CardTele, "Teleport Offset",  2, 15,  5,                    function(v) States.TeleportOffset       = v end)
+local CT=MakeCard(ScrollEvo,3); MakeCardTitle(CT,"TELEPORT SETTINGS")
+MakeToggle(CT,"Teleport to Pet",States.TeleportEnabled,function(v) States.TeleportEnabled=v end)
+MakeSlider(CT,"Teleport Offset",2,15,States.TeleportOffset,function(v) States.TeleportOffset=v end)
 
-local CardNudge = MakeCard(ScrollEvo, 4)
-MakeCardTitle(CardNudge, "VELOCITY NUDGE")
-MakeToggle(CardNudge, "Velocity Nudge (Walk into Combat)", States.VelocityNudgeEnabled, function(v) States.VelocityNudgeEnabled = v end)
-MakeSlider(CardNudge, "Nudge Strength", 10, 100, 55,                   function(v) States.NudgeStrength        = v end)
+local CN=MakeCard(ScrollEvo,4); MakeCardTitle(CN,"VELOCITY NUDGE")
+MakeToggle(CN,"Velocity Nudge (Walk into Combat)",States.VelocityNudgeEnabled,function(v) States.VelocityNudgeEnabled=v end)
+MakeSlider(CN,"Nudge Strength",10,100,States.NudgeStrength,function(v) States.NudgeStrength=v end)
 
 -- =========================================================
 -- UTILITIES TAB
 -- =========================================================
 
 --- CARD 1: Sparkle Alarm ---
-local CardSparkle = MakeCard(ScrollUtil, 1)
-MakeCardTitle(CardSparkle, "✨ SPARKLE EVOMON ALARM")
+local CSp=MakeCard(ScrollUtil,1); MakeCardTitle(CSp,"✨ SPARKLE EVOMON ALARM")
 
--- Indicador de estado
-local SparkleStatusRow = Instance.new("Frame", CardSparkle)
-SparkleStatusRow.Size             = UDim2.new(1, 0, 0, 36)
-SparkleStatusRow.BackgroundColor3 = Color3.fromRGB(14, 12, 24)
-SparkleStatusRow.BorderSizePixel  = 0
-SparkleStatusRow.LayoutOrder      = NextOrder()
-ApplyCorner(SparkleStatusRow, 8)
-local SpkPad = Instance.new("UIPadding", SparkleStatusRow)
-SpkPad.PaddingLeft = UDim.new(0, 10) SpkPad.PaddingRight = UDim.new(0, 10)
+local SpkRow=Instance.new("Frame",CSp); SpkRow.Size=UDim2.new(1,0,0,36)
+SpkRow.BackgroundColor3=Color3.fromRGB(14,12,24); SpkRow.BorderSizePixel=0; SpkRow.LayoutOrder=NxtO()
+ApplyCorner(SpkRow,8)
+local SpkPad=Instance.new("UIPadding",SpkRow); SpkPad.PaddingLeft=UDim.new(0,10)
+local SpkDot=Instance.new("Frame",SpkRow); SpkDot.Size=UDim2.new(0,9,0,9)
+SpkDot.Position=UDim2.new(0,0,0.5,0); SpkDot.AnchorPoint=Vector2.new(0,0.5)
+SpkDot.BackgroundColor3=Color3.fromRGB(70,70,90); SpkDot.BorderSizePixel=0; SpkDot.ZIndex=8; ApplyCorner(SpkDot,5)
+local SpkLbl=MakeLabel(SpkRow,"Detector inactivo",12,Theme.TextDim)
+SpkLbl.Size=UDim2.new(1,-18,1,0); SpkLbl.Position=UDim2.new(0,16,0,0); SpkLbl.ZIndex=8
 
-local SparkleStatusDot = Instance.new("Frame", SparkleStatusRow)
-SparkleStatusDot.Size             = UDim2.new(0, 9, 0, 9)
-SparkleStatusDot.Position         = UDim2.new(0, 0, 0.5, 0)
-SparkleStatusDot.AnchorPoint      = Vector2.new(0, 0.5)
-SparkleStatusDot.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
-SparkleStatusDot.BorderSizePixel  = 0
-SparkleStatusDot.ZIndex           = 8
-ApplyCorner(SparkleStatusDot, 5)
-
-local SparkleStatusLbl = MakeLabel(SparkleStatusRow, "Detector inactivo", 12, Theme.TextDim)
-SparkleStatusLbl.Size     = UDim2.new(1, -18, 1, 0)
-SparkleStatusLbl.Position = UDim2.new(0, 16, 0, 0)
-SparkleStatusLbl.ZIndex   = 8
-
--- Toggle principal
-MakeToggle(CardSparkle, "Alarm de Sparkle Evomon", States.SparkleAlarmEnabled, function(v)
-    States.SparkleAlarmEnabled = v
-    sparkleDetected = false
-    lastSparkleMsg  = ""
-    seenMessages    = {}
+MakeToggle(CSp,"Alarm de Sparkle Evomon",States.SparkleAlarmEnabled,function(v)
+    States.SparkleAlarmEnabled=v; sparkleDetected=false; lastSparkleMsg=""; seenMessages={}
     if not v then
         StopAlarm()
-        sparkleDetected = false
-        SparkleStatusDot.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
-        SparkleStatusLbl.Text       = "Detector inactivo"
-        SparkleStatusLbl.TextColor3 = Theme.TextDim
+        SpkDot.BackgroundColor3=Color3.fromRGB(70,70,90)
+        SpkLbl.Text="Detector inactivo"; SpkLbl.TextColor3=Theme.TextDim
     else
-        sparkleDetected = false
-        seenMessages    = {}
-        SparkleStatusDot.BackgroundColor3 = Color3.fromRGB(80, 200, 120)
-        SparkleStatusLbl.Text       = "Escuchando chat del server..."
-        SparkleStatusLbl.TextColor3 = Theme.TextMuted
+        SpkDot.BackgroundColor3=Color3.fromRGB(80,200,120)
+        SpkLbl.Text="Escuchando chat..."; SpkLbl.TextColor3=Theme.TextMuted
     end
     SaveConfig()
 end)
 
--- Botón test
-local WrapTest = Instance.new("Frame", CardSparkle)
-WrapTest.Size             = UDim2.new(1, 0, 0, 48)
-WrapTest.BackgroundTransparency = 1
-WrapTest.LayoutOrder      = NextOrder()
-local TestBtn = Instance.new("TextButton", WrapTest)
-TestBtn.Size             = UDim2.new(1, 0, 0, 36)
-TestBtn.Position         = UDim2.new(0, 0, 0, 6)
-TestBtn.BackgroundColor3 = Color3.fromRGB(40, 30, 65)
-TestBtn.Text             = "🔔  Probar Sonido de Alarma"
-TestBtn.Font             = Enum.Font.GothamSemibold
-TestBtn.TextSize         = 13
-TestBtn.TextColor3       = Theme.TextMuted
-TestBtn.BorderSizePixel  = 0
-TestBtn.ZIndex           = 8
-TestBtn.AutoButtonColor  = false
-ApplyCorner(TestBtn, 10)
-ApplyStroke(TestBtn, Theme.Border, 1)
-TestBtn.MouseEnter:Connect(function() TweenService:Create(TestBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(60,44,90), TextColor3 = Theme.Text}):Play() end)
-TestBtn.MouseLeave:Connect(function() TweenService:Create(TestBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(40,30,65), TextColor3 = Theme.TextMuted}):Play() end)
-TestBtn.MouseButton1Click:Connect(function()
-    StopAlarm()  -- reset limpio
-    task.wait(0.1)
-    PlayAlarm()
-end)
+-- Inicializar indicador si ya estaba activo al cargar
+if States.SparkleAlarmEnabled then
+    SpkDot.BackgroundColor3=Color3.fromRGB(80,200,120)
+    SpkLbl.Text="Escuchando chat..."; SpkLbl.TextColor3=Theme.TextMuted
+end
 
--- Botón silenciar
-local WrapStop = Instance.new("Frame", CardSparkle)
-WrapStop.Size             = UDim2.new(1, 0, 0, 48)
-WrapStop.BackgroundTransparency = 1
-WrapStop.LayoutOrder      = NextOrder()
-local StopBtn = Instance.new("TextButton", WrapStop)
-StopBtn.Size             = UDim2.new(1, 0, 0, 36)
-StopBtn.Position         = UDim2.new(0, 0, 0, 6)
-StopBtn.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
-StopBtn.Text             = "🔇  Silenciar Alarma"
-StopBtn.Font             = Enum.Font.GothamSemibold
-StopBtn.TextSize         = 13
-StopBtn.TextColor3       = Color3.fromRGB(220, 120, 120)
-StopBtn.BorderSizePixel  = 0
-StopBtn.ZIndex           = 8
-StopBtn.AutoButtonColor  = false
-ApplyCorner(StopBtn, 10)
-StopBtn.MouseEnter:Connect(function() TweenService:Create(StopBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(90,30,30)}):Play() end)
-StopBtn.MouseLeave:Connect(function() TweenService:Create(StopBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(60,20,20)}):Play() end)
+local TestBtn=MakeDarkBtn(CSp,"🔔  Probar Sonido de Alarma",NxtO())
+TestBtn.MouseButton1Click:Connect(function() StopAlarm() task.wait(0.05) PlayAlarm() end)
+
+local StopBtn, StopWrap = MakeDarkBtn(CSp,"🔇  Silenciar Alarma",NxtO())
+StopBtn.BackgroundColor3=Color3.fromRGB(60,20,20); StopBtn.TextColor3=Color3.fromRGB(220,120,120)
+StopBtn.MouseEnter:Connect(function() TweenService:Create(StopBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(90,30,30)}):Play() end)
+StopBtn.MouseLeave:Connect(function() TweenService:Create(StopBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(60,20,20)}):Play() end)
 StopBtn.MouseButton1Click:Connect(function()
-    StopAlarm()
-    sparkleDetected = false
-    lastSparkleMsg  = ""
+    StopAlarm(); sparkleDetected=false; lastSparkleMsg=""
     if States.SparkleAlarmEnabled then
-        SparkleStatusDot.BackgroundColor3 = Color3.fromRGB(80, 200, 120)
-        SparkleStatusLbl.Text       = "Escuchando chat..."
-        SparkleStatusLbl.TextColor3 = Theme.TextMuted
+        SpkDot.BackgroundColor3=Color3.fromRGB(80,200,120)
+        SpkLbl.Text="Escuchando chat..."; SpkLbl.TextColor3=Theme.TextMuted
     end
 end)
 
--- Actualizar indicador en tiempo real
 RunService.Heartbeat:Connect(function()
     if not States.SparkleAlarmEnabled then return end
     if sparkleDetected then
-        local pulse = math.abs(math.sin(tick() * 5))
-        SparkleStatusDot.BackgroundColor3 = Color3.fromRGB(255, math.floor(40 + pulse*60), math.floor(40 + pulse*40))
-        SparkleStatusLbl.Text       = "⚠ SPARKLE: " .. lastSparkleMsg:sub(1, 38)
-        SparkleStatusLbl.TextColor3 = Color3.fromRGB(255, 210, 60)
+        local p=math.abs(math.sin(tick()*5))
+        SpkDot.BackgroundColor3=Color3.fromRGB(255,math.floor(40+p*60),math.floor(40+p*40))
+        SpkLbl.Text="⚠ SPARKLE: "..lastSparkleMsg:sub(1,38)
+        SpkLbl.TextColor3=Color3.fromRGB(255,210,60)
     end
 end)
 
 --- CARD 2: Server Hop ---
-local CardServerHop = MakeCard(ScrollUtil, 2)
-MakeCardTitle(CardServerHop, "🌐 SERVER HOP — SERVIDOR PRIVADO")
+local CSH=MakeCard(ScrollUtil,2); MakeCardTitle(CSH,"🌐 SERVER HOP — SERVIDOR PRIVADO")
 
 -- Info box
-local SrvInfoBox = Instance.new("Frame", CardServerHop)
-SrvInfoBox.Size             = UDim2.new(1, 0, 0, 44)
-SrvInfoBox.BackgroundColor3 = Color3.fromRGB(14, 12, 24)
-SrvInfoBox.BorderSizePixel  = 0
-SrvInfoBox.LayoutOrder      = NextOrder()
-ApplyCorner(SrvInfoBox, 8)
-ApplyStroke(SrvInfoBox, Theme.Border, 1)
-local SrvBoxPad = Instance.new("UIPadding", SrvInfoBox)
-SrvBoxPad.PaddingLeft = UDim.new(0, 10) SrvBoxPad.PaddingTop = UDim.new(0, 4)
-local SrvBoxLayout = Instance.new("UIListLayout", SrvInfoBox)
-SrvBoxLayout.Padding = UDim.new(0, 2)
-local SrvL1 = MakeLabel(SrvInfoBox, "Servidor: MrCalvoConPelo (Privado)", 12, Theme.TextMuted)
-SrvL1.Size = UDim2.new(1, 0, 0, 16) SrvL1.ZIndex = 8
-local SrvL2 = MakeLabel(SrvInfoBox, "Access Code: 8148aea3...75303b", 11, Theme.TextDim)
-SrvL2.Size = UDim2.new(1, 0, 0, 14) SrvL2.ZIndex = 8
+local SrvBox=Instance.new("Frame",CSH); SrvBox.Size=UDim2.new(1,0,0,44)
+SrvBox.BackgroundColor3=Color3.fromRGB(14,12,24); SrvBox.BorderSizePixel=0; SrvBox.LayoutOrder=NxtO()
+ApplyCorner(SrvBox,8); ApplyStroke(SrvBox,Theme.Border,1)
+local SBPad=Instance.new("UIPadding",SrvBox); SBPad.PaddingLeft=UDim.new(0,10); SBPad.PaddingTop=UDim.new(0,4)
+local SBLy=Instance.new("UIListLayout",SrvBox); SBLy.Padding=UDim.new(0,2)
+local SL1=MakeLabel(SrvBox,"Servidor: MrCalvoConPelo (Privado)",12,Theme.TextMuted)
+SL1.Size=UDim2.new(1,0,0,16); SL1.ZIndex=8
+local SL2=MakeLabel(SrvBox,"Code: 98ccafc4...093075",11,Theme.TextDim)
+SL2.Size=UDim2.new(1,0,0,14); SL2.ZIndex=8
 
--- Label de estado del hop
-local HopStatusWrap = Instance.new("Frame", CardServerHop)
-HopStatusWrap.Size             = UDim2.new(1, 0, 0, 22)
-HopStatusWrap.BackgroundTransparency = 1
-HopStatusWrap.LayoutOrder      = NextOrder()
-local HopStatusLbl = MakeLabel(HopStatusWrap, "", 11, Theme.TextDim, Enum.Font.Gotham, Enum.TextXAlignment.Center)
-HopStatusLbl.Size = UDim2.new(1, 0, 1, 0) HopStatusLbl.ZIndex = 8
+-- Status label
+local HopStat=Instance.new("Frame",CSH); HopStat.Size=UDim2.new(1,0,0,22)
+HopStat.BackgroundTransparency=1; HopStat.LayoutOrder=NxtO()
+local HopStatLbl=MakeLabel(HopStat,"",11,Theme.TextDim,Enum.Font.Gotham,Enum.TextXAlignment.Center)
+HopStatLbl.Size=UDim2.new(1,0,1,0); HopStatLbl.ZIndex=8
 
--- Botón principal HOP
-local WrapHop = Instance.new("Frame", CardServerHop)
-WrapHop.Size             = UDim2.new(1, 0, 0, 52)
-WrapHop.BackgroundTransparency = 1
-WrapHop.LayoutOrder      = NextOrder()
-
-local HopBtn = Instance.new("TextButton", WrapHop)
-HopBtn.Size             = UDim2.new(1, 0, 0, 42)
-HopBtn.Position         = UDim2.new(0, 0, 0, 6)
-HopBtn.BackgroundColor3 = Theme.Purple
-HopBtn.Text             = "🚀  Ir al Servidor Privado AHORA"
-HopBtn.Font             = Enum.Font.GothamBold
-HopBtn.TextSize         = 14
-HopBtn.TextColor3       = Theme.Text
-HopBtn.BorderSizePixel  = 0
-HopBtn.ZIndex           = 8
-HopBtn.AutoButtonColor  = false
-ApplyCorner(HopBtn, 10)
-local HopGrad = Instance.new("UIGradient", HopBtn)
-HopGrad.Color    = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.Purple), ColorSequenceKeypoint.new(1, Theme.PurpleLight)})
-HopGrad.Rotation = 90
-HopBtn.MouseEnter:Connect(function() TweenService:Create(HopBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.PurpleLight}):Play() end)
-HopBtn.MouseLeave:Connect(function() TweenService:Create(HopBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Purple}):Play() end)
-
+local HopBtn=MakePurpleBtn(CSH,"🚀  Ir al Servidor Privado AHORA",NxtO())
 HopBtn.MouseButton1Click:Connect(function()
-    if hopCooldown then
-        HopStatusLbl.Text = "⏳ Cooldown activo — espera unos segundos"
-        return
-    end
-    HopBtn.Text     = "⏳  Conectando al servidor..."
-    HopStatusLbl.Text = "Ejecutando TeleportToReservedServer..."
-    local ok = DoServerHop()
+    if hopCooldown then HopStatLbl.Text="⏳ Cooldown activo..." return end
+    HopBtn.Text="⏳  Conectando..."; HopStatLbl.Text="Buscando JobId del servidor privado..."
+    DoServerHop()
     task.delay(3, function()
-        if HopBtn and HopBtn.Parent then
-            HopBtn.Text = "🚀  Ir al Servidor Privado AHORA"
-        end
-        HopStatusLbl.Text = ok and "✔ Teleport enviado" or "✘ Error — revisa Output"
-        task.delay(5, function()
-            if HopStatusLbl and HopStatusLbl.Parent then
-                HopStatusLbl.Text = ""
-            end
-        end)
+        if HopBtn and HopBtn.Parent then HopBtn.Text="🚀  Ir al Servidor Privado AHORA" end
+        HopStatLbl.Text=""
     end)
 end)
 
--- Toggle Auto-Hop
-MakeToggle(CardServerHop, "Auto-Hop cada 10s buscando Sparkle", States.AutoServerHopEnabled, function(v)
-    States.AutoServerHopEnabled = v
+MakeToggle(CSH,"Auto-Hop cada 10s buscando Sparkle",States.AutoServerHopEnabled,function(v)
+    States.AutoServerHopEnabled=v
     if v then
-        sparkleDetected = false
-        HopStatusLbl.Text = "Hopeando cada 10s — se para si hay Sparkle"
-        HopStatusLbl.TextColor3 = Color3.fromRGB(80, 200, 120)
+        sparkleDetected=false
+        HopStatLbl.Text="Hopeando cada 10s — para si hay Sparkle"
+        HopStatLbl.TextColor3=Color3.fromRGB(80,200,120)
     else
-        HopStatusLbl.Text = ""
+        HopStatLbl.Text=""
     end
     SaveConfig()
 end)
 
--- Nota
-local NoteRow = Instance.new("Frame", CardServerHop)
-NoteRow.Size             = UDim2.new(1, 0, 0, 26)
-NoteRow.BackgroundTransparency = 1
-NoteRow.LayoutOrder      = NextOrder()
-local NoteLbl = MakeLabel(NoteRow, "Hop cada 10s → para automaticamente al detectar Sparkle", 10, Theme.TextDim)
-NoteLbl.Size  = UDim2.new(1, 0, 1, 0)
-NoteLbl.ZIndex = 8
+-- Inicializar status si ya estaba activo
+if States.AutoServerHopEnabled then
+    HopStatLbl.Text="Auto-Hop RESTAURADO — buscando Sparkle"
+    HopStatLbl.TextColor3=Color3.fromRGB(80,200,120)
+end
 
--- Cooldown timer visual (se actualiza cada segundo mientras hay cooldown)
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if hopCooldown and HopStatusLbl and HopStatusLbl.Parent then
-            -- no sobreescribir si ya hay mensaje
-        end
-    end
+local NR=Instance.new("Frame",CSH); NR.Size=UDim2.new(1,0,0,24); NR.BackgroundTransparency=1; NR.LayoutOrder=NxtO()
+local NL=MakeLabel(NR,"Hop cada 10s → para al detectar Sparkle + suena alarma",10,Theme.TextDim)
+NL.Size=UDim2.new(1,0,1,0); NL.ZIndex=8
+
+--- CARD 3: Config ---
+local CCfg=MakeCard(ScrollUtil,3); MakeCardTitle(CCfg,"⚙  CONFIGURACIÓN")
+
+-- Estado del filesystem
+local CfgBox=Instance.new("Frame",CCfg); CfgBox.Size=UDim2.new(1,0,0,44)
+CfgBox.BackgroundColor3=Color3.fromRGB(14,12,24); CfgBox.BorderSizePixel=0; CfgBox.LayoutOrder=NxtO()
+ApplyCorner(CfgBox,8); ApplyStroke(CfgBox,Theme.Border,1)
+local CBPad=Instance.new("UIPadding",CfgBox); CBPad.PaddingLeft=UDim.new(0,10); CBPad.PaddingTop=UDim.new(0,4)
+local CBLy=Instance.new("UIListLayout",CfgBox); CBLy.Padding=UDim.new(0,2)
+local CL1=MakeLabel(CfgBox,
+    hasFS and "✔ Executor soporta writefile/readfile" or "✘ Sin soporte de filesystem",
+    11, hasFS and Color3.fromRGB(80,200,120) or Color3.fromRGB(220,100,100))
+CL1.Size=UDim2.new(1,0,0,16); CL1.ZIndex=8
+local CL2=MakeLabel(CfgBox,"Archivo: MrCalvoHub_config.json",10,Theme.TextDim)
+CL2.Size=UDim2.new(1,0,0,14); CL2.ZIndex=8
+
+MakeToggle(CCfg,"Auto-Guardar config (cada 15s)",States.AutoSaveEnabled,function(v)
+    States.AutoSaveEnabled=v
+    if v then SaveConfig() end
 end)
 
--- =========================================================
--- F9 SHORTCUT
--- =========================================================
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == Enum.KeyCode.F9 then
-        ScanBtn:FireButton1Click()
-    end
-end)
-
--- =========================================================
--- CARD 3 UTILITIES: CONFIG & AUTO-RESTART
--- =========================================================
-local CardConfig = MakeCard(ScrollUtil, 3)
-MakeCardTitle(CardConfig, "⚙  CONFIGURACIÓN")
-
--- Info de estado del sistema de guardado
-local CfgInfoBox = Instance.new("Frame", CardConfig)
-CfgInfoBox.Size             = UDim2.new(1, 0, 0, 44)
-CfgInfoBox.BackgroundColor3 = Color3.fromRGB(14, 12, 24)
-CfgInfoBox.BorderSizePixel  = 0
-CfgInfoBox.LayoutOrder      = NextOrder()
-ApplyCorner(CfgInfoBox, 8)
-ApplyStroke(CfgInfoBox, Theme.Border, 1)
-local CfgInfoPad = Instance.new("UIPadding", CfgInfoBox)
-CfgInfoPad.PaddingLeft = UDim.new(0,10) CfgInfoPad.PaddingTop = UDim.new(0,4)
-local CfgInfoLayout = Instance.new("UIListLayout", CfgInfoBox)
-CfgInfoLayout.Padding = UDim.new(0,2)
-local CfgL1 = MakeLabel(CfgInfoBox,
-    hasFileSystem and "✔ Executor compatible con writefile/readfile" or "✘ Executor NO soporta guardado en disco",
-    11, hasFileSystem and Color3.fromRGB(80,200,120) or Color3.fromRGB(220,100,100))
-CfgL1.Size = UDim2.new(1,0,0,16) CfgL1.ZIndex = 8
-local CfgL2 = MakeLabel(CfgInfoBox, "Archivo: MrCalvoHub_config.json", 10, Theme.TextDim)
-CfgL2.Size = UDim2.new(1,0,0,14) CfgL2.ZIndex = 8
-
--- Toggle AutoSave
-MakeToggle(CardConfig, "Auto-Guardar config (cada 15s)", States.AutoSaveEnabled, function(v)
-    States.AutoSaveEnabled = v
-    if v then SaveConfig() end  -- guardar inmediatamente al activar
-end)
-
--- Toggle AutoRestart
-MakeToggle(CardConfig, "Auto-Reiniciar script tras server hop", States.AutoRestartEnabled, function(v)
-    States.AutoRestartEnabled = v
+MakeToggle(CCfg,"Auto-Reiniciar script tras server hop",States.AutoRestartEnabled,function(v)
+    States.AutoRestartEnabled=v
     SaveConfig()
-    SaveScriptToDisk()
 end)
 
--- Nota sobre AutoRestart
-local CfgNoteRow = Instance.new("Frame", CardConfig)
-CfgNoteRow.Size             = UDim2.new(1, 0, 0, 38)
-CfgNoteRow.BackgroundColor3 = Color3.fromRGB(30, 20, 10)
-CfgNoteRow.BorderSizePixel  = 0
-CfgNoteRow.LayoutOrder      = NextOrder()
-ApplyCorner(CfgNoteRow, 8)
-local CfgNotePad = Instance.new("UIPadding", CfgNoteRow)
-CfgNotePad.PaddingLeft = UDim.new(0,10) CfgNotePad.PaddingRight = UDim.new(0,10) CfgNotePad.PaddingTop = UDim.new(0,4)
-local CfgNoteLayout = Instance.new("UIListLayout", CfgNoteRow)
-CfgNoteLayout.Padding = UDim.new(0,2)
-local CfgNote1 = MakeLabel(CfgNoteRow, "⚠ Para Auto-Reinicio guarda el script como:", 10, Color3.fromRGB(255,200,80))
-CfgNote1.Size = UDim2.new(1,0,0,15) CfgNote1.ZIndex = 8
-local CfgNote2 = MakeLabel(CfgNoteRow, "MrCalvoHub_autorun.lua en tu carpeta del executor", 10, Theme.TextDim)
-CfgNote2.Size = UDim2.new(1,0,0,14) CfgNote2.ZIndex = 8
+-- Nota auto-restart
+local AR_Note=Instance.new("Frame",CCfg); AR_Note.Size=UDim2.new(1,0,0,42)
+AR_Note.BackgroundColor3=Color3.fromRGB(30,20,5); AR_Note.BorderSizePixel=0; AR_Note.LayoutOrder=NxtO()
+ApplyCorner(AR_Note,8)
+local AR_Pad=Instance.new("UIPadding",AR_Note); AR_Pad.PaddingLeft=UDim.new(0,10); AR_Pad.PaddingTop=UDim.new(0,4)
+local AR_Ly=Instance.new("UIListLayout",AR_Note); AR_Ly.Padding=UDim.new(0,2)
+local AR1=MakeLabel(AR_Note,"⚠  Para el Auto-Reinicio:",10,Color3.fromRGB(255,200,60))
+AR1.Size=UDim2.new(1,0,0,15); AR1.ZIndex=8
+local AR2=MakeLabel(AR_Note,"Guarda el script como MrCalvoHub_autorun.lua",10,Theme.TextDim)
+AR2.Size=UDim2.new(1,0,0,13); AR2.ZIndex=8
+local AR3=MakeLabel(AR_Note,"en la carpeta autorun/ de tu executor",10,Theme.TextDim)
+AR3.Size=UDim2.new(1,0,0,12); AR3.ZIndex=8
 
--- Botón: Guardar config ahora
-local WrapSaveCfg = Instance.new("Frame", CardConfig)
-WrapSaveCfg.Size             = UDim2.new(1, 0, 0, 50)
-WrapSaveCfg.BackgroundTransparency = 1
-WrapSaveCfg.LayoutOrder      = NextOrder()
-local SaveCfgBtn = Instance.new("TextButton", WrapSaveCfg)
-SaveCfgBtn.Size             = UDim2.new(1, 0, 0, 38)
-SaveCfgBtn.Position         = UDim2.new(0, 0, 0, 6)
-SaveCfgBtn.BackgroundColor3 = Color3.fromRGB(40, 30, 65)
-SaveCfgBtn.Text             = "💾  Guardar Config Ahora"
-SaveCfgBtn.Font             = Enum.Font.GothamSemibold
-SaveCfgBtn.TextSize         = 13
-SaveCfgBtn.TextColor3       = Theme.TextMuted
-SaveCfgBtn.BorderSizePixel  = 0
-SaveCfgBtn.ZIndex           = 8
-SaveCfgBtn.AutoButtonColor  = false
-ApplyCorner(SaveCfgBtn, 10)
-ApplyStroke(SaveCfgBtn, Theme.Border, 1)
-SaveCfgBtn.MouseEnter:Connect(function()
-    TweenService:Create(SaveCfgBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(60,44,90), TextColor3 = Theme.Text}):Play()
-end)
-SaveCfgBtn.MouseLeave:Connect(function()
-    TweenService:Create(SaveCfgBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(40,30,65), TextColor3 = Theme.TextMuted}):Play()
-end)
-SaveCfgBtn.MouseButton1Click:Connect(function()
-    local prev = States.AutoSaveEnabled
-    States.AutoSaveEnabled = true
-    SaveConfig()
-    States.AutoSaveEnabled = prev
-    SaveCfgBtn.Text = "✔  Config Guardada!"
-    TweenService:Create(SaveCfgBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(30,60,35)}):Play()
-    task.delay(2, function()
-        if SaveCfgBtn and SaveCfgBtn.Parent then
-            SaveCfgBtn.Text = "💾  Guardar Config Ahora"
-            TweenService:Create(SaveCfgBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(40,30,65)}):Play()
+-- Botón guardar config ahora
+local SaveNowBtn=MakeDarkBtn(CCfg,"💾  Guardar Config Ahora",NxtO())
+SaveNowBtn.MouseButton1Click:Connect(function()
+    local prev=States.AutoSaveEnabled; States.AutoSaveEnabled=true
+    SaveConfig(); States.AutoSaveEnabled=prev
+    SaveNowBtn.Text="✔  ¡Config Guardada!"
+    TweenService:Create(SaveNowBtn,TweenInfo.new(0.3),{BackgroundColor3=Color3.fromRGB(25,55,30)}):Play()
+    task.delay(2,function()
+        if SaveNowBtn and SaveNowBtn.Parent then
+            SaveNowBtn.Text="💾  Guardar Config Ahora"
+            TweenService:Create(SaveNowBtn,TweenInfo.new(0.3),{BackgroundColor3=Color3.fromRGB(40,30,65)}):Play()
         end
     end)
 end)
 
--- Botón: Guardar script en disco para auto-reinicio
-local WrapSaveScript = Instance.new("Frame", CardConfig)
-WrapSaveScript.Size             = UDim2.new(1, 0, 0, 50)
-WrapSaveScript.BackgroundTransparency = 1
-WrapSaveScript.LayoutOrder      = NextOrder()
-local SaveScriptBtn = Instance.new("TextButton", WrapSaveScript)
-SaveScriptBtn.Size             = UDim2.new(1, 0, 0, 38)
-SaveScriptBtn.Position         = UDim2.new(0, 0, 0, 6)
-SaveScriptBtn.BackgroundColor3 = Theme.Purple
-SaveScriptBtn.Text             = "📁  Guardar Script en Disco (Auto-Run)"
-SaveScriptBtn.Font             = Enum.Font.GothamSemibold
-SaveScriptBtn.TextSize         = 13
-SaveScriptBtn.TextColor3       = Theme.Text
-SaveScriptBtn.BorderSizePixel  = 0
-SaveScriptBtn.ZIndex           = 8
-SaveScriptBtn.AutoButtonColor  = false
-ApplyCorner(SaveScriptBtn, 10)
-local SaveSGrad = Instance.new("UIGradient", SaveScriptBtn)
-SaveSGrad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0,Theme.Purple),ColorSequenceKeypoint.new(1,Theme.PurpleLight)})
-SaveSGrad.Rotation = 90
-SaveScriptBtn.MouseEnter:Connect(function()
-    TweenService:Create(SaveScriptBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.PurpleLight}):Play()
-end)
-SaveScriptBtn.MouseLeave:Connect(function()
-    TweenService:Create(SaveScriptBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Purple}):Play()
-end)
+-- Botón guardar script en autorun
+local SaveScriptBtn=MakePurpleBtn(CCfg,"📁  Guardar Script en autorun/ (Auto-Run)",NxtO())
 SaveScriptBtn.MouseButton1Click:Connect(function()
-    if not hasFileSystem then
-        SaveScriptBtn.Text = "✘ Executor no soporta writefile"
-        task.delay(3, function()
-            if SaveScriptBtn and SaveScriptBtn.Parent then
-                SaveScriptBtn.Text = "📁  Guardar Script en Disco (Auto-Run)"
-            end
-        end)
+    if not hasFS then
+        SaveScriptBtn.Text="✘ Executor no soporta writefile"
+        task.delay(3,function() if SaveScriptBtn and SaveScriptBtn.Parent then
+            SaveScriptBtn.Text="📁  Guardar Script en autorun/ (Auto-Run)" end end)
         return
     end
-    -- Guardar el script actual en disco para que el executor lo ejecute
-    -- al unirse al nuevo servidor (via autorun folder o manualmente)
     pcall(function()
-        -- Intentar obtener el source del script actual
+        -- Crear carpeta autorun si no existe
+        pcall(function() if not isfolder("autorun") then makefolder("autorun") end end)
+        -- Intentar obtener el source del script ejecutado
         local src = nil
-        -- Método 1: getscriptsource / getscriptbytecode (Synapse, Wave)
-        pcall(function() src = getscriptsource and getscriptsource() end)
-        -- Método 2: leer desde workspace si está disponible  
-        if not src or #src < 100 then
-            -- Guardar instrucciones en su lugar
-            src = readfile and isfile(SCRIPT_FILE) and readfile(SCRIPT_FILE) or nil
+        -- Método: getscriptsource() en Synapse/Wave
+        pcall(function() if getscriptsource then src = getscriptsource() end end)
+        -- Método: leer el script si ya está en disco
+        if (not src or #src < 500) and isfile(SCRIPT_FILE) then
+            src = readfile(SCRIPT_FILE)
         end
-        if src and #src > 100 then
+        if src and #src > 500 then
             writefile(SCRIPT_FILE, src)
-            writefile("autorun/" .. SCRIPT_FILE, src)  -- carpeta autorun del executor
-            SaveScriptBtn.Text = "✔  Guardado en autorun/"
-            TweenService:Create(SaveScriptBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(30,60,35)}):Play()
+            pcall(function() writefile("autorun/" .. SCRIPT_FILE, src) end)
+            SaveScriptBtn.Text="✔  Guardado en autorun/"
+            TweenService:Create(SaveScriptBtn,TweenInfo.new(0.3),{BackgroundColor3=Color3.fromRGB(25,55,30)}):Play()
         else
-            -- Si no podemos obtener el source, pedir al usuario que lo pegue manualmente
-            SaveScriptBtn.Text = "⚠ Guarda el .lua en autorun/ manualmente"
-            TweenService:Create(SaveScriptBtn, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(60,40,10)}):Play()
+            -- No podemos auto-obtener el source, informar
+            SaveScriptBtn.Text="⚠  Guarda el .lua en autorun/ manualmente"
+            TweenService:Create(SaveScriptBtn,TweenInfo.new(0.3),{BackgroundColor3=Color3.fromRGB(60,40,10)}):Play()
         end
-        SaveScriptToDisk()
+        -- Guardar flag de restart para el próximo hop
+        SafeWriteJSON(RESTART_FILE,{shouldRestart=States.AutoRestartEnabled})
     end)
-    task.delay(4, function()
+    task.delay(4,function()
         if SaveScriptBtn and SaveScriptBtn.Parent then
-            SaveScriptBtn.Text = "📁  Guardar Script en Disco (Auto-Run)"
-            TweenService:Create(SaveScriptBtn, TweenInfo.new(0.3), {BackgroundColor3 = Theme.Purple}):Play()
+            SaveScriptBtn.Text="📁  Guardar Script en autorun/ (Auto-Run)"
+            TweenService:Create(SaveScriptBtn,TweenInfo.new(0.3),{BackgroundColor3=Theme.Purple}):Play()
         end
     end)
-end)
-
--- =========================================================
--- Guardar config cuando cambia cualquier estado importante
--- (llamar SaveConfig() en los toggles/sliders clave)
--- =========================================================
-TeleportService.LocalPlayerArrivedFromTeleport:Connect(function()
-    -- Restaurar toggles al llegar al nuevo servidor
-    task.wait(1)
-    if States.SparkleAlarmEnabled then
-        print("[MrCalvoHub] Config restaurada: SparkleAlarm activa")
-    end
-    if States.AutoServerHopEnabled then
-        print("[MrCalvoHub] Config restaurada: AutoHop activo")
-    end
 end)
 
 -- =========================================================
 -- F9 SHORTCUT
 -- =========================================================
-UserInputService.InputBegan:Connect(function(input, gpe)
+UserInputService.InputBegan:Connect(function(i, gpe)
     if gpe then return end
-    if input.KeyCode == Enum.KeyCode.F9 then
-        ScanBtn:FireButton1Click()
-    end
+    if i.KeyCode == Enum.KeyCode.F9 then ScanBtn:FireButton1Click() end
 end)
 
--- Guardar config al salir/cerrar
-game:BindToClose(function()
-    SaveConfig()
-    SaveScriptToDisk()
-end)
+-- Guardar al cerrar
+game:BindToClose(function() SaveConfig() end)
 
-print("[MrCalvoHub v6.0] ✓ Cargado — AutoSave + AutoRestart + Config Persistente.")
-if States.AutoSaveEnabled then
-    print("[MrCalvoHub] Config guardada cargada — AutoSave activo")
-end
-if States.AutoServerHopEnabled then
-    print("[MrCalvoHub] AutoHop restaurado: ACTIVO")
-end
-if States.SparkleAlarmEnabled then
-    print("[MrCalvoHub] SparkleAlarm restaurada: ACTIVA")
-end
+-- Restaurar loops si estaban activos
+if States.KillAuraEnabled      then task.spawn(KillAuraLoop)        end
+if States.AutoSpamEEnabled     then task.spawn(AutoSpamELoop)       end
+if States.AutoLeaveBattleEnabled then task.spawn(AutoLeaveBattleLoop) end
+if States.AutoFightWalk        then task.spawn(AutoFightWalkLoop)   end
+
+print("[MrCalvoHub v6.0] ✓ Listo — AutoSave + AutoRestart + Config persistente")
+if States.AutoSaveEnabled      then print("[MrCalvoHub] AutoSave: ACTIVO") end
+if States.AutoServerHopEnabled then print("[MrCalvoHub] AutoHop:  ACTIVO") end
+if States.SparkleAlarmEnabled  then print("[MrCalvoHub] Sparkle:  ACTIVO") end

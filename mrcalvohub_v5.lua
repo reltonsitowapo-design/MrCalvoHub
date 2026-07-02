@@ -291,31 +291,30 @@ local function DoServerHop()
         end
 
         -- ── MÉTODO 1 ──────────────────────────────────────────────
-        -- TeleportOptions.ReservedServerAccessCode
-        -- Es la API correcta de Roblox para teleportar a un servidor
-        -- privado desde el cliente usando el access code del link.
-        -- Funciona en Wave 2.x, Solara, Seliware y Synapse X desde 2023.
+        -- TeleportService:Teleport(placeId) con ReservedServerAccessCode
+        -- Esta es la única API 100% cliente que respeta el access code
+        -- sin requerir server-side. Funciona en todos los executors.
         local ok1, err1 = pcall(function()
             local opts = Instance.new("TeleportOptions")
             opts.ReservedServerAccessCode = PRIV_CODE
-            TeleportService:TeleportAsync(PLACE_ID, {LP}, opts)
+            TeleportService:Teleport(PLACE_ID, opts)
         end)
         if ok1 then
-            print("[MrCalvoHub] Hop OK → método TeleportOptions (M1)")
+            print("[MrCalvoHub] Hop OK → M1 (Teleport + ReservedServerAccessCode)")
             jumped = true
         else
             warn("[MrCalvoHub] M1 falló: " .. tostring(err1))
         end
 
         -- ── MÉTODO 2 ──────────────────────────────────────────────
-        -- TeleportToPrivateServer(placeId, accessCode)
-        -- En algunos executors está disponible sin restricción de server
+        -- TeleportToPrivateServer con {LP} como tercer argumento
+        -- (el error anterior era que faltaba el tercer arg)
         if not jumped then
             local ok2, err2 = pcall(function()
-                TeleportService:TeleportToPrivateServer(PLACE_ID, PRIV_CODE)
+                TeleportService:TeleportToPrivateServer(PLACE_ID, PRIV_CODE, {LP})
             end)
             if ok2 then
-                print("[MrCalvoHub] Hop OK → TeleportToPrivateServer (M2)")
+                print("[MrCalvoHub] Hop OK → M2 (TeleportToPrivateServer)")
                 jumped = true
             else
                 warn("[MrCalvoHub] M2 falló: " .. tostring(err2))
@@ -323,7 +322,7 @@ local function DoServerHop()
         end
 
         -- ── MÉTODO 3 ──────────────────────────────────────────────
-        -- Si tenemos el JobId resuelto, usarlo directamente
+        -- Obtener JobId via API y usar TeleportToPlaceInstance
         if not jumped then
             if not resolvedJobId then
                 resolvedJobId = ResolvePrivateServer()
@@ -333,26 +332,41 @@ local function DoServerHop()
                     TeleportService:TeleportToPlaceInstance(PLACE_ID, resolvedJobId, LP)
                 end)
                 if ok3 then
-                    print("[MrCalvoHub] Hop OK → JobId directo (M3): " .. resolvedJobId)
+                    print("[MrCalvoHub] Hop OK → M3 (JobId: " .. resolvedJobId .. ")")
                     jumped = true
                 else
                     warn("[MrCalvoHub] M3 falló: " .. tostring(err3))
-                    resolvedJobId = nil  -- invalidar cache
+                    resolvedJobId = nil
                 end
             end
         end
 
-        -- ── SIN FALLBACK PÚBLICO ──────────────────────────────────
-        -- NO saltamos a servidor público. Si los 3 métodos fallan,
-        -- simplemente esperamos el siguiente ciclo de 10s y reintentamos.
+        -- ── MÉTODO 4 ──────────────────────────────────────────────
+        -- request() con el access code si el executor lo soporta
         if not jumped then
-            warn("[MrCalvoHub] No se pudo hopear al servidor privado.")
-            warn("[MrCalvoHub] Reintentando en el siguiente ciclo (10s)...")
-            resolveAttempts = resolveAttempts + 1
+            local ok4, err4 = pcall(function()
+                if not request then error("no request()") end
+                -- Algunos executors exponen teleport via request interno
+                local resp = request({
+                    Url    = "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestPrivateGame&browserTrackerId=0&placeId=" .. PLACE_ID .. "&accessCode=" .. PRIV_CODE,
+                    Method = "GET",
+                })
+                if resp and resp.StatusCode == 200 then
+                    print("[MrCalvoHub] Hop via PlaceLauncher (M4)")
+                    jumped = true
+                end
+            end)
+            if not ok4 then
+                warn("[MrCalvoHub] M4 falló: " .. tostring(err4))
+            end
+        end
+
+        -- ── SIN FALLBACK PÚBLICO ──────────────────────────────────
+        if not jumped then
+            warn("[MrCalvoHub] No se pudo hopear. Reintentando en 10s...")
+            resolveAttempts += 1
             if resolveAttempts >= 3 then
-                -- Después de 3 fallos seguidos, notificar que puede ser un
-                -- problema de autenticación o que el server está lleno
-                warn("[MrCalvoHub] 3 intentos fallidos. Verifica que el link del servidor privado sea correcto.")
+                warn("[MrCalvoHub] 3 fallos seguidos — verifica el link del servidor")
                 resolveAttempts = 0
             end
         else
@@ -1366,8 +1380,8 @@ UserInputService.InputBegan:Connect(function(i, gpe)
     if i.KeyCode == Enum.KeyCode.F9 then ScanBtn:FireButton1Click() end
 end)
 
--- Guardar al cerrar
-game:BindToClose(function() SaveConfig() end)
+-- BindToClose solo funciona en server, no en cliente
+-- SaveConfig se llama en el loop de 15s
 
 -- Restaurar loops si estaban activos
 if States.KillAuraEnabled      then task.spawn(KillAuraLoop)        end

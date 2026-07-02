@@ -233,75 +233,103 @@ TeleportService.TeleportInitFailed:Connect(function(player, reason, msg)
 end)
 
 local function GetPrivateJobId()
-    -- El acceso a /servers/Reserved requiere la cookie de Roblox.
-    -- Los executors (Wave, Synapse, Solara, etc.) la envían automáticamente
-    -- con request(). Sin request(), HttpGet con useAuthentication=true.
-
     local function fetch(url)
-        -- Método 1: request() — el executor adjunta cookie automáticamente
         if type(request) == "function" then
             local ok, r = pcall(request, {
                 Url     = url,
                 Method  = "GET",
                 Headers = { ["Accept"] = "application/json" },
             })
-            if ok and r and r.Body and #r.Body > 5 then
-                return r.Body
-            end
+            if ok and r and r.Body and #r.Body > 5 then return r.Body end
         end
-        -- Método 2: game:HttpGet con useAuthentication=true
         local ok2, raw = pcall(game.HttpGet, game, url, true)
         if ok2 and raw and #raw > 5 then return raw end
         return nil
     end
 
-    local function extractJobId(raw)
-        if not raw or #raw < 5 then return nil end
-        local ok, d = pcall(HttpService.JSONDecode, HttpService, raw)
-        if not ok or not d then return nil end
-        local items = (type(d.data) == "table" and d.data)
-                   or (type(d.servers) == "table" and d.servers)
-                   or {}
-        for _, s in ipairs(items) do
-            local id = s.id or s.jobId or s.gameInstanceId
-            if type(id) == "string" and #id > 10 then
-                return id
-            end
-        end
-        return nil
-    end
-
-    -- Intentar obtener el JobId del servidor privado
-    -- El endpoint Reserved devuelve los servers privados del juego
-    -- con tu cookie de Roblox (que el executor provee)
+    -- ── MÉTODO 1: Usar el accessCode directamente en la URL ───────────────
+    -- La API de Roblox acepta el accessCode como parámetro para filtrar
+    -- exactamente el servidor privado que corresponde a ese link.
     local raw = fetch(
         "https://games.roblox.com/v1/games/" .. PLACE_ID
-        .. "/servers/Reserved?limit=25&sortOrder=Asc"
+        .. "/servers/Reserved?limit=100&sortOrder=Asc"
     )
-    local jobId = extractJobId(raw)
-    if jobId then
-        print("[MrCalvoHub] JobId obtenido via /Reserved: " .. jobId)
-        return jobId
+
+    if raw and #raw > 5 then
+        local ok, d = pcall(HttpService.JSONDecode, HttpService, raw)
+        if ok and d and type(d.data) == "table" then
+            -- Primero: buscar el servidor cuyo accessCode coincide con PRIV_CODE
+            for _, s in ipairs(d.data) do
+                local code = s.accessCode or s.vipServerCode or s.privateServerCode or ""
+                if code:lower():find(PRIV_CODE:lower(), 1, true) then
+                    local jobId = s.id or s.jobId
+                    if jobId then
+                        print("[MrCalvoHub] ✔ JobId exacto por accessCode: " .. jobId)
+                        return jobId
+                    end
+                end
+            end
+
+            -- Segundo: si solo hay UN servidor reservado, ese es el nuestro
+            if #d.data == 1 then
+                local jobId = d.data[1].id or d.data[1].jobId
+                if jobId then
+                    print("[MrCalvoHub] ✔ JobId (único servidor reservado): " .. jobId)
+                    return jobId
+                end
+            end
+
+            -- Debug: mostrar todos los servidores encontrados
+            print("[MrCalvoHub] Servidores reservados encontrados: " .. #d.data)
+            for i, s in ipairs(d.data) do
+                local jobId = s.id or s.jobId or "?"
+                local code  = s.accessCode or s.vipServerCode or "sin_code"
+                print(string.format("[MrCalvoHub]   [%d] jobId=%s | code=%s", i, jobId, code))
+            end
+        end
     end
 
-    -- Segundo intento: endpoint de private-servers
+    -- ── MÉTODO 2: Endpoint de VIP servers con el accessCode ───────────────
+    -- Este endpoint acepta el accessCode directamente y devuelve el JobId
     local raw2 = fetch(
         "https://games.roblox.com/v1/games/" .. PLACE_ID
-        .. "/private-servers?limit=25"
+        .. "/servers/Reserved?accessCode=" .. PRIV_CODE .. "&limit=10"
     )
-    local jobId2 = extractJobId(raw2)
-    if jobId2 then
-        print("[MrCalvoHub] JobId obtenido via /private-servers: " .. jobId2)
-        return jobId2
+    if raw2 and #raw2 > 5 then
+        local ok2, d2 = pcall(HttpService.JSONDecode, HttpService, raw2)
+        if ok2 and d2 and type(d2.data) == "table" and #d2.data > 0 then
+            local jobId = d2.data[1].id or d2.data[1].jobId
+            if jobId then
+                print("[MrCalvoHub] ✔ JobId via accessCode en URL: " .. jobId)
+                return jobId
+            end
+        end
     end
 
-    -- Sin JobId: mostrar respuestas para debug
+    -- ── MÉTODO 3: API de private-server link resolution ───────────────────
+    -- Roblox tiene una API interna que dado el accessCode devuelve el jobId
+    local raw3 = fetch(
+        "https://games.roblox.com/v1/games/" .. PLACE_ID
+        .. "/private-servers?accessCode=" .. PRIV_CODE .. "&limit=10"
+    )
+    if raw3 and #raw3 > 5 then
+        local ok3, d3 = pcall(HttpService.JSONDecode, HttpService, raw3)
+        if ok3 and d3 then
+            local items = type(d3.data)=="table" and d3.data or {}
+            for _, s in ipairs(items) do
+                local jobId = s.id or s.jobId or s.gameInstanceId
+                if jobId then
+                    print("[MrCalvoHub] ✔ JobId via /private-servers: " .. jobId)
+                    return jobId
+                end
+            end
+        end
+    end
+
+    warn("[MrCalvoHub] No se pudo obtener el JobId exacto del servidor privado")
     if raw then
-        print("[MrCalvoHub] Respuesta /Reserved (primeros 200 chars): " .. raw:sub(1,200))
-    else
-        warn("[MrCalvoHub] /Reserved no respondió — sin cookie o sin request()")
+        print("[MrCalvoHub] Respuesta cruda (debug): " .. raw:sub(1, 300))
     end
-
     return nil
 end
 

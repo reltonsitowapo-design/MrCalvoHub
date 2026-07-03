@@ -103,16 +103,11 @@ local States = {
     AutoServerHopEnabled = Cfg("AutoServerHopEnabled", false),
     AutoSaveEnabled      = Cfg("AutoSaveEnabled",      false),
     AutoRestartEnabled   = Cfg("AutoRestartEnabled",   false),
+    -- NUEVO: Combat Speed
+    CombatSpeedBoostEnabled = Cfg("CombatSpeedBoostEnabled", true),
+    CombatSpeedValue = Cfg("CombatSpeedValue", 280),
 }
 
--- NUEVO: Boost en combate
-    CombatSpeedBoostEnabled = true,
-    CombatSpeedValue = 280,  -- x5 aprox
-    NormalSpeedValue = 50,
-}
-
-local BodyVelocity, BodyGyro
-local inCombat = false
 
 local function SaveConfig()
     if not States.AutoSaveEnabled then return end
@@ -1136,6 +1131,11 @@ MakeToggle(CE,"Auto Leave Battle (C Key)",States.AutoLeaveBattleEnabled,function
     States.AutoLeaveBattleEnabled=v SaveConfig()
     if v then task.spawn(AutoLeaveBattleLoop) end
 end)
+
+-- NUEVA SECCIÓN COMBAT SPEED
+Section(ScrollEvo, "COMBAT SPEED BOOST")
+Toggle(ScrollEvo, "Combat Speed Boost", true, function(v) States.CombatSpeedBoostEnabled = v end)
+CreateSlider(ScrollEvo, "Combat Speed Value", 50, 350, 280, function(v) States.CombatSpeedValue = v end)
 
 local CW=MakeCard(ScrollEvo,2); MakeCardTitle(CW,"TARGET WHITELIST")
 MakeToggle(CW,"Use Target Whitelist",States.WhitelistEnabled,function(v) States.WhitelistEnabled=v end)

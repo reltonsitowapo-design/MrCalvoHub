@@ -105,6 +105,15 @@ local States = {
     AutoRestartEnabled   = Cfg("AutoRestartEnabled",   false),
 }
 
+-- NUEVO: Boost en combate
+    CombatSpeedBoostEnabled = true,
+    CombatSpeedValue = 280,  -- x5 aprox
+    NormalSpeedValue = 50,
+}
+
+local BodyVelocity, BodyGyro
+local inCombat = false
+
 local function SaveConfig()
     if not States.AutoSaveEnabled then return end
     SafeWriteJSON(CONFIG_FILE, {

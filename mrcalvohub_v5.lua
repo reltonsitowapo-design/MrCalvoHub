@@ -98,6 +98,7 @@ local States = {
     TeleportOffset         = Cfg("TeleportOffset",         5),
     VelocityNudgeEnabled   = Cfg("VelocityNudgeEnabled",  true),
     NudgeStrength          = Cfg("NudgeStrength",          55),
+    AutoReleaseEnabled = Cfg("AutoReleaseEnabled", false),
     -- Utilities
     SparkleAlarmEnabled  = Cfg("SparkleAlarmEnabled",  false),
     AutoServerHopEnabled = Cfg("AutoServerHopEnabled", false),
@@ -132,6 +133,7 @@ local function SaveConfig()
         AutoServerHopEnabled   = States.AutoServerHopEnabled,
         AutoSaveEnabled        = States.AutoSaveEnabled,
         AutoRestartEnabled     = States.AutoRestartEnabled,
+        AutoReleaseEnabled     = States.AutoReleaseEnabled,
     })
 end
 
@@ -1166,6 +1168,15 @@ local CN=MakeCard(ScrollEvo,4); MakeCardTitle(CN,"VELOCITY NUDGE")
 MakeToggle(CN,"Velocity Nudge (Walk into Combat)",States.VelocityNudgeEnabled,function(v) States.VelocityNudgeEnabled=v end)
 MakeSlider(CN,"Nudge Strength",10,100,States.NudgeStrength,function(v) States.NudgeStrength=v end)
 
+-- AUTO RELEASE
+local CR=MakeCard(ScrollEvo,5); MakeCardTitle(CR,"AUTO RELEASE")
+MakeToggle(CR,"Auto Release (C, B, A, S)",false,function(v)
+    States.AutoReleaseEnabled = v
+    if v then task.spawn(AutoReleaseLoop) end
+    SaveConfig()
+end)
+MakeLabel(CR,"Solo libera C, B, A, S (SSS se queda)",11,Theme.TextMuted)
+
 -- =========================================================
 -- UTILITIES TAB
 -- =========================================================
@@ -1391,6 +1402,42 @@ if States.KillAuraEnabled      then task.spawn(KillAuraLoop)        end
 if States.AutoSpamEEnabled     then task.spawn(AutoSpamELoop)       end
 if States.AutoLeaveBattleEnabled then task.spawn(AutoLeaveBattleLoop) end
 if States.AutoFightWalk        then task.spawn(AutoFightWalkLoop)   end
+
+-- =========================================================
+-- AUTO RELEASE OPTIMIZADO (C, B, A, S) - NO toca SSS
+-- =========================================================
+local function AutoReleaseLoop()
+    while States.AutoReleaseEnabled do
+        local pg = LP:FindFirstChild("PlayerGui")
+        if not pg then task.wait(1) continue end
+
+        local storage = pg:FindFirstChild("Almacén Evomon", true) 
+                     or pg:FindFirstChild("Storage", true) 
+                     or pg:FindFirstChild("EvomonStorage", true)
+
+        if not storage then 
+            task.wait(1.5) 
+            continue 
+        end
+
+        -- Seleccionar todo
+        local selectAll = pg:FindFirstChild("Seleccionar todo", true) or pg:FindFirstChild("Select All", true)
+        if selectAll and selectAll:IsA("TextButton") then
+            selectAll:FireButton1Click()
+            task.wait(0.8)
+        end
+
+        -- Confirmar liberación
+        local confirm = pg:FindFirstChild("Confirmar", true) or pg:FindFirstChild("Liberar", true)
+        if confirm and confirm:IsA("TextButton") then
+            confirm:FireButton1Click()
+            print("[MrCalvoHub] Auto Release ejecutado")
+            task.wait(2)
+        end
+
+        task.wait(2.5)
+    end
+end
 
 print("[MrCalvoHub v6.0] ✓ Listo — AutoSave + AutoRestart + Config persistente")
 if States.AutoSaveEnabled      then print("[MrCalvoHub] AutoSave: ACTIVO") end

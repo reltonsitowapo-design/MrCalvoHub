@@ -1160,73 +1160,44 @@ do
     end)
 end
 
--- ====================== NUEVO: TP GLOBAL A LUMINARCH ======================
+-- ====================== TP GLOBAL A LUMINARCH ======================
 local function FindAndTeleportToLuminarch()
     local root = GetRoot()
     if not root then 
-        print("[MrCalvoHub] No se encontró HumanoidRootPart") 
+        print("[MrCalvoHub] ❌ No se encontró tu personaje") 
         return 
     end
 
-    local targets = {"Pet0_96", "Pet0_98", "Luminarch", "096", "098"}
+    local targets = {"Pet0_96", "Pet0_98", "Luminarch", "096", "098", "lumin"}
     local found = nil
-    local bestDist = math.huge
 
-    print("[MrCalvoHub] Buscando Luminarch globalmente...")
+    print("[MrCalvoHub] Buscando Luminarch en todo el mapa...")
 
-    -- Buscar en Workspace (mundo actual)
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        for _, t in ipairs(targets) do
-            if obj.Name:find(t) or (obj.Name:lower():find("luminarch")) then
+        for _, keyword in ipairs(targets) do
+            if obj.Name:find(keyword) or obj.Name:lower():find("luminarch") then
                 local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
                 if part then
                     local dist = (part.Position - root.Position).Magnitude
-                    print("→ Encontrado: " .. obj.Name .. " | Dist: " .. math.floor(dist) .. " studs")
-                    if dist < bestDist then
-                        bestDist = dist
-                        found = part
-                    end
+                    print("✅ Encontrado: " .. obj.Name .. " | Distancia: " .. math.floor(dist))
+                    found = part
+                    break
                 end
             end
         end
-    end
-
-    -- Buscar también en ReplicatedStorage (por si está precargado)
-    if not found then
-        pcall(function()
-            for _, obj in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                for _, t in ipairs(targets) do
-                    if obj.Name:find(t) or (obj.Name:lower():find("luminarch")) then
-                        local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                        if part then
-                            print("→ Encontrado en ReplicatedStorage: " .. obj.Name)
-                            found = part
-                            break
-                        end
-                    end
-                end
-                if found then break end
-            end
-        end)
+        if found then break end
     end
 
     if found then
-        local offset = CFrame.new(0, 5, -States.TeleportOffset)
-        root.CFrame = found.CFrame * offset
-        print("✅ Teleportado a Luminarch (" .. found.Parent.Name .. ")")
-        
-        -- Nudge extra si está muy lejos
-        if bestDist > 100 then
-            task.wait(0.2)
-            root.Velocity = (found.Position - root.Position).Unit * 80
-        end
+        root.CFrame = found.CFrame * CFrame.new(0, 6, -States.TeleportOffset)
+        print("🚀 Teleportado a Luminarch!")
     else
-        print("❌ Luminarch no encontrado en este servidor. Prueba Server Hop o cambia de mundo.")
+        print("❌ Luminarch no encontrado en este servidor.")
     end
 end
 
 -- Botón nuevo
-local LuminarchBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Global)", NxtO())
+local LuminarchBtn = MakePurpleBtn(CW, "🔍 TP a Luminarch (Global)", NxtO())
 LuminarchBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
 
 local CT=MakeCard(ScrollEvo,3); MakeCardTitle(CT,"TELEPORT SETTINGS")

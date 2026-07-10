@@ -1161,98 +1161,114 @@ do
 end
 
 -- ====================== NUEVO: TP GLOBAL A LUMINARCH ======================
-local function FindAndTeleportToLuminarch()
+local function IntelligentSearchLuminarch()
     local root = GetRoot()
     if not root then 
-        print("[MrCalvoHub] ❌ No se encontró tu personaje") 
+        print("[MrCalvoHub] ❌ No personaje encontrado") 
         return 
     end
 
-    print("🔍 Buscando Luminarch (Boss Lv.180 ~8000 HP) en Isla de Temporada...")
+    print("🧠 Búsqueda Inteligente de Luminarch + Isla de Temporada...")
 
     local candidates = {}
-    
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        local name = obj.Name
-        local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-        if not part then continue end
+    local seasonalFound = false
 
-        local health, level = nil, nil
-        local hum = obj:FindFirstChildOfClass("Humanoid")
-        if hum then
-            health = hum.MaxHealth
-            -- Corrección del error
-            pcall(function() level = hum:GetAttribute("Level") or hum.Level end)
-        end
+    -- Buscar en Workspace y ReplicatedStorage
+    local searchPlaces = {Workspace, game:GetService("ReplicatedStorage")}
 
-        local dist = math.floor((part.Position - root.Position).Magnitude)
-
-        -- Búsqueda más amplia para Luminarch
-        if name:lower():find("luminarch") or name:find("Pet0_96") or name:find("Pet0_98") or 
-           name:lower():find("boss") or (health and health >= 7000 and health <= 9000) or (level == 180) then
+    for _, place in ipairs(searchPlaces) do
+        for _, obj in ipairs(place:GetDescendants()) do
+            local name = obj.Name
+            local nameLower = name:lower()
             
-            table.insert(candidates, {
-                name = name, 
-                dist = dist, 
-                health = health or "???", 
-                level = level or "???", 
-                part = part
-            })
-            print(string.format("   %d studs | HP:%s | Lv:%s → %s", dist, health or "???", level or "???", name))
-        end
-    end
+            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+            if not part then continue end
 
-    if #candidates == 0 then
-        print("❌ No se encontró Luminarch. Prueba cambiar a la Isla de Temporada.")
-        return
-    end
+            local health, level = nil, nil
+            local hum = obj:FindFirstChildOfClass("Humanoid")
+            if hum then
+                health = hum.MaxHealth
+                pcall(function() level = hum:GetAttribute("Level") or hum.Level end)
+            end
 
-    table.sort(candidates, function(a,b) return a.dist < b.dist end)
-    local target = candidates[1].part
+            local dist = (part.Position - root.Position).Magnitude
 
-    root.CFrame = target.CFrame * CFrame.new(0, 8, -States.TeleportOffset)
-    print("🚀 Teleportado a Luminarch! (" .. candidates[1].name .. ")")
-end
+            -- Detectar Isla de Temporada
+            if nameLower:find("season") or nameLower:find("temporada") or nameLower:find("event") or 
+               nameLower:find("genesis") or nameLower:find("limited") then
+                print("🌍 ISLA DE TEMPORADA DETECTADA: " .. name)
+                seasonalFound = true
+            end
 
--- Función para buscar Isla de Temporada / Seasonal Island
-local function GoToSeasonalIsland()
-    print("🌍 Buscando Isla de Temporada / Seasonal Island...")
-
-    local seasonalNames = {"Seasonal", "Temporada", "Event", "Special", "Genesis", "Limited", "Temp", "IslaDeTemporada"}
-
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        local nameLower = obj.Name:lower()
-        for _, keyword in ipairs(seasonalNames) do
-            if nameLower:find(keyword) then
-                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                if part then
-                    local root = GetRoot()
-                    if root then
-                        root.CFrame = part.CFrame * CFrame.new(0, 15, 0)
-                        print("✅ Teleportado a: " .. obj.Name)
-                        task.wait(1.5)
-                        FindAndTeleportToLuminarch()
-                        return
-                    end
-                end
+            -- Detectar Luminarch
+            if nameLower:find("luminarch") or name:find("Pet0_96") or name:find("Pet0_98") or 
+               (health and health >= 7000 and health <= 9000) or (level == 180) then
+                
+                table.insert(candidates, {
+                    name = name,
+                    dist = math.floor(dist),
+                    health = health or "???",
+                    level = level or "???",
+                    part = part
+                })
+                print(string.format("   💎 CANDIDATO: %s | %d studs | HP:%s | Lv:%s", name, math.floor(dist), health or "???", level or "???"))
             end
         end
     end
 
-    print("❌ No se encontró la Isla de Temporada. Abre el menú de islas manualmente y vuelve a intentar.")
+    if #candidates > 0 then
+        table.sort(candidates, function(a,b) return a.dist < b.dist end)
+        local target = candidates[1].part
+        root.CFrame = target.CFrame * CFrame.new(0, 10, -States.TeleportOffset)
+        print("🚀 TELEPORTADO A LUMINARCH!")
+        return true
+    elseif seasonalFound then
+        print("🌍 Isla de Temporada encontrada pero Luminarch no visible aún. Acércate más.")
+    else
+        print("❌ Nada encontrado. Recomiendo Server Hop.")
+        -- Auto Server Hop si está activado
+        if States.AutoServerHopEnabled then
+            print("🔄 Haciendo Server Hop automático...")
+            DoServerHop()
+        end
+    end
+    return false
 end
 
 -- ====================== BOTONES ======================
 
-local LumiBtn, _ = MakePurpleBtn(CW, "🔍 TP Directo a Luminarch", NxtO())
-LumiBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
+local SmartBtn, _ = MakePurpleBtn(CW, "🧠 Búsqueda Inteligente Luminarch", NxtO())
+SmartBtn.MouseButton1Click:Connect(IntelligentSearchLuminarch)
 
-local SeasonalBtn, _ = MakePurpleBtn(CW, "🌍 Ir a Isla de Temporada + Luminarch", NxtO())
-SeasonalBtn.MouseButton1Click:Connect(GoToSeasonalIsland)
+local SeasonalBtn, _ = MakePurpleBtn(CW, "🌍 Ir a Isla de Temporada", NxtO())
+SeasonalBtn.MouseButton1Click:Connect(function()
+    print("Buscando Isla de Temporada...")
+    local found = false
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        local n = obj.Name:lower()
+        if n:find("season") or n:find("temporada") or n:find("event") or n:find("genesis") then
+            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+            if part then
+                local root = GetRoot()
+                if root then
+                    root.CFrame = part.CFrame * CFrame.new(0, 20, 0)
+                    print("✅ Teleportado cerca de " .. obj.Name)
+                    found = true
+                    task.wait(2)
+                    IntelligentSearchLuminarch()
+                    break
+                end
+            end
+        end
+    end
+    if not found then
+        print("❌ Isla de Temporada no encontrada. Prueba abrir el menú de islas.")
+    end
+end)
 
-local ScanBtn, _ = MakePurpleBtn(CW, "🔍 Listar Mundos e Islas (F9)", NxtO())
-ScanBtn.MouseButton1Click:Connect(function()
-    print("\n=== 🌍 ISLAS Y MUNDOS DETECTADOS ===")
+local ListBtn, _ = MakePurpleBtn(CW, "📋 Listar Islas y Mundos", NxtO())
+ListBtn.MouseButton1Click:Connect(function()
+    print("\n=== 📋 ISLAS / MUNDOS DETECTADOS ===")
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj.Name:find("Island") or obj.Name:find("World") or obj.Name:find("Zone") or 
            obj.Name:lower():find("season") or obj.Name:lower():find("temp") or obj.Name:lower():find("event") then
@@ -1261,11 +1277,11 @@ ScanBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- F9 actualizado
+-- F9 = Búsqueda Inteligente
 UserInputService.InputBegan:Connect(function(i, gpe)
     if gpe then return end
     if i.KeyCode == Enum.KeyCode.F9 then
-        ScanBtn:FireButton1Click()
+        IntelligentSearchLuminarch()
     end
 end)
 

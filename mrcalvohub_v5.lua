@@ -1168,70 +1168,98 @@ local function FindAndTeleportToLuminarch()
         return 
     end
 
-    print("🔍 Buscando Luminarch... (lista de candidatos)")
+    print("🔍 Buscando Luminarch (Boss Lv.180 ~8000 HP)...")
 
     local candidates = {}
     
     for _, obj in ipairs(Workspace:GetDescendants()) do
         local name = obj.Name
-        if name:find("Pet0_") or name:lower():find("lumin") then
-            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-            if part then
-                local dist = math.floor((part.Position - root.Position).Magnitude)
-                
-                table.insert(candidates, {
-                    name = name,
-                    dist = dist,
-                    part = part
-                })
-                
-                print(string.format("   %d studs → %s", dist, name))
+        local isPossible = false
+        
+        -- Búsqueda por nombre
+        if name:lower():find("luminarch") or 
+           name:find("Pet0_96") or name:find("Pet0_98") or 
+           name:find("096") or name:find("098") then
+            isPossible = true
+        end
+
+        local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+        if not part then continue end
+
+        local health = nil
+        local level = nil
+
+        -- Buscar atributos de vida y nivel
+        pcall(function()
+            if obj:GetAttribute("Health") then 
+                health = obj:GetAttribute("Health") 
+            elseif obj:GetAttribute("MaxHealth") then 
+                health = obj:GetAttribute("MaxHealth") 
             end
+            if obj:GetAttribute("Level") then 
+                level = obj:GetAttribute("Level") 
+            end
+        end)
+
+        -- Buscar en Humanoid si existe
+        local hum = obj:FindFirstChildOfClass("Humanoid")
+        if hum then
+            health = hum.MaxHealth or health
+            level = hum:GetAttribute("Level") or level
+        end
+
+        local dist = math.floor((part.Position - root.Position).Magnitude)
+
+        if isPossible or (health and health >= 7000 and health <= 9000) or (level == 180) then
+            table.insert(candidates, {
+                name = name,
+                dist = dist,
+                health = health or "???",
+                level = level or "???",
+                part = part,
+                obj = obj
+            })
+            
+            print(string.format("   %d studs | HP: %s | Lv: %s → %s", dist, health or "???", level or "???", name))
         end
     end
 
     if #candidates == 0 then
-        print("❌ No se encontró ningún Pet0_ ni nada relacionado con Luminarch en este servidor.")
+        print("❌ No se encontró ningún candidato que coincida con Luminarch (Boss).")
+        print("   Prueba cambiar de servidor o entrar a otro mundo.")
         return
     end
 
-    print("\n📋 " .. #candidates .. " candidato(s) encontrado(s):")
-
-    -- Ordenar por distancia
+    print("\n📋 Candidatos encontrados (" .. #candidates .. "):")
     table.sort(candidates, function(a,b) return a.dist < b.dist end)
 
     local target = nil
 
     for _, c in ipairs(candidates) do
-        print(string.format("   [%d studs] %s", c.dist, c.name))
+        print(string.format("   [%d studs] %s | HP:%s | Lv:%s", c.dist, c.name, c.health, c.level))
         
-        -- Prioridad alta: nombres más específicos de Luminarch
-        if c.name:lower():find("luminarch") or 
-           c.name:find("Pet0_96") or 
-           c.name:find("Pet0_098") or 
-           c.name:find("Pet0_96") then
+        -- Prioridad: El que mejor coincida
+        if (c.name:lower():find("luminarch") or c.name:find("Pet0_96") or c.name:find("Pet0_98")) and 
+           (c.health == "???" or (c.health >= 7000 and c.health <= 9000)) then
             target = c.part
-            print("✅ Objetivo prioritario encontrado: " .. c.name)
+            print("✅ ¡LUMINARCH DETECTADO!")
             break
         end
     end
 
-    -- Si no encontró prioritario, tomar el más cercano
-    if not target and #candidates > 0 then
+    if not target then
         target = candidates[1].part
-        print("⚠️ Tomando el más cercano como fallback: " .. candidates[1].name)
+        print("⚠️ Usando el más cercano como fallback.")
     end
 
     if target then
-        root.CFrame = target.CFrame * CFrame.new(0, 6, -States.TeleportOffset)
-        print("🚀 Teleportado correctamente a Luminarch!")
-    else
-        print("❌ No se pudo seleccionar un objetivo válido.")
+        root.CFrame = target.CFrame * CFrame.new(0, 8, -States.TeleportOffset)
+        print("🚀 Teleportado al objetivo!")
     end
 end
 
 -- Botón
-local LuminarchBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Lista + TP)", NxtO())
+local LuminarchBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Boss 8000HP)", NxtO())
 LuminarchBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
 
 local CT=MakeCard(ScrollEvo,3); MakeCardTitle(CT,"TELEPORT SETTINGS")

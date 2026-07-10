@@ -1160,6 +1160,46 @@ do
     end)
 end
 
+-- ====================== TP GLOBAL A LUMINARCH ======================
+local function FindAndTeleportToLuminarch()
+    local root = GetRoot()
+    if not root then 
+        print("[MrCalvoHub] ❌ No se encontró tu personaje") 
+        return 
+    end
+
+    local targets = {"Pet0_96", "Pet0_98", "Luminarch", "096", "098", "lumin"}
+    local found = nil
+
+    print("[MrCalvoHub] Buscando Luminarch en todo el mapa...")
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        for _, keyword in ipairs(targets) do
+            if obj.Name:find(keyword) or obj.Name:lower():find("luminarch") then
+                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+                if part then
+                    local dist = (part.Position - root.Position).Magnitude
+                    print("✅ Encontrado: " .. obj.Name .. " | Distancia: " .. math.floor(dist))
+                    found = part
+                    break
+                end
+            end
+        end
+        if found then break end
+    end
+
+    if found then
+        root.CFrame = found.CFrame * CFrame.new(0, 6, -States.TeleportOffset)
+        print("🚀 Teleportado a Luminarch!")
+    else
+        print("❌ Luminarch no encontrado en este servidor.")
+    end
+end
+
+-- Botón nuevo
+local LuminarchBtn = MakePurpleBtn(CW, "🔍 TP a Luminarch (Global)", NxtO())
+LuminarchBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
+
 local CT=MakeCard(ScrollEvo,3); MakeCardTitle(CT,"TELEPORT SETTINGS")
 MakeToggle(CT,"Teleport to Pet",States.TeleportEnabled,function(v) States.TeleportEnabled=v end)
 MakeSlider(CT,"Teleport Offset",2,15,States.TeleportOffset,function(v) States.TeleportOffset=v end)

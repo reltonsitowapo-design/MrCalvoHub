@@ -1168,7 +1168,7 @@ local function FindAndTeleportToLuminarch()
         return 
     end
 
-    print("🔍 Buscando Luminarch (Boss Lv.180 ~8000 HP)...")
+    print("🔍 Buscando Luminarch (Boss Lv.180 ~8000 HP) en Isla de Temporada...")
 
     local candidates = {}
     
@@ -1181,13 +1181,16 @@ local function FindAndTeleportToLuminarch()
         local hum = obj:FindFirstChildOfClass("Humanoid")
         if hum then
             health = hum.MaxHealth
-            level = hum:GetAttribute("Level") or hum.Level
+            -- Corrección del error
+            pcall(function() level = hum:GetAttribute("Level") or hum.Level end)
         end
 
         local dist = math.floor((part.Position - root.Position).Magnitude)
 
+        -- Búsqueda más amplia para Luminarch
         if name:lower():find("luminarch") or name:find("Pet0_96") or name:find("Pet0_98") or 
-           (health and health >= 7000 and health <= 9000) or (level == 180) then
+           name:lower():find("boss") or (health and health >= 7000 and health <= 9000) or (level == 180) then
+            
             table.insert(candidates, {
                 name = name, 
                 dist = dist, 
@@ -1195,11 +1198,12 @@ local function FindAndTeleportToLuminarch()
                 level = level or "???", 
                 part = part
             })
+            print(string.format("   %d studs | HP:%s | Lv:%s → %s", dist, health or "???", level or "???", name))
         end
     end
 
     if #candidates == 0 then
-        print("❌ No se encontró Luminarch en este servidor.")
+        print("❌ No se encontró Luminarch. Prueba cambiar a la Isla de Temporada.")
         return
     end
 
@@ -1210,46 +1214,58 @@ local function FindAndTeleportToLuminarch()
     print("🚀 Teleportado a Luminarch! (" .. candidates[1].name .. ")")
 end
 
--- Función para listar Mundos / Islas
-local function ScanWorldsAndIslands()
-    print("\n=== 🌍 MUNDOS E ISLAS DETECTADAS ===")
-    local count = 0
+-- Función para buscar Isla de Temporada / Seasonal Island
+local function GoToSeasonalIsland()
+    print("🌍 Buscando Isla de Temporada / Seasonal Island...")
+
+    local seasonalNames = {"Seasonal", "Temporada", "Event", "Special", "Genesis", "Limited", "Temp", "IslaDeTemporada"}
+
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj.Name:find("World") or obj.Name:find("Island") or obj.Name:find("Zone") or 
-           obj.Name:find("Map") or obj.Name:lower():find("lumin") or obj.Name:lower():find("boss") then
-            local isLocked = obj.Name:lower():find("lock") or obj.Name:lower():find("block") or false
-            print(string.format("%s %s", isLocked and "🔒" or "🌍", obj.Name))
-            count += 1
+        local nameLower = obj.Name:lower()
+        for _, keyword in ipairs(seasonalNames) do
+            if nameLower:find(keyword) then
+                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+                if part then
+                    local root = GetRoot()
+                    if root then
+                        root.CFrame = part.CFrame * CFrame.new(0, 15, 0)
+                        print("✅ Teleportado a: " .. obj.Name)
+                        task.wait(1.5)
+                        FindAndTeleportToLuminarch()
+                        return
+                    end
+                end
+            end
         end
     end
-    print("Total detectados: " .. count)
+
+    print("❌ No se encontró la Isla de Temporada. Abre el menú de islas manualmente y vuelve a intentar.")
 end
 
--- ====================== BOTONES NUEVOS ======================
+-- ====================== BOTONES ======================
 
--- Botón Luminarch
-local LumiBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Boss 8000HP)", NxtO())
+local LumiBtn, _ = MakePurpleBtn(CW, "🔍 TP Directo a Luminarch", NxtO())
 LumiBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
 
--- Botón Listar Mundos
-local WorldsBtn, _ = MakePurpleBtn(CW, "🌍 Listar Mundos e Islas", NxtO())
-WorldsBtn.MouseButton1Click:Connect(ScanWorldsAndIslands)
+local SeasonalBtn, _ = MakePurpleBtn(CW, "🌍 Ir a Isla de Temporada + Luminarch", NxtO())
+SeasonalBtn.MouseButton1Click:Connect(GoToSeasonalIsland)
 
--- Botón Combinado (Mundo + Luminarch)
-local CombinedBtn, _ = MakePurpleBtn(CW, "🌍 TP a Mundo Luminarch + Boss", NxtO())
-CombinedBtn.MouseButton1Click:Connect(function()
-    ScanWorldsAndIslands()
-    task.wait(0.5)
-    FindAndTeleportToLuminarch()
+local ScanBtn, _ = MakePurpleBtn(CW, "🔍 Listar Mundos e Islas (F9)", NxtO())
+ScanBtn.MouseButton1Click:Connect(function()
+    print("\n=== 🌍 ISLAS Y MUNDOS DETECTADOS ===")
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj.Name:find("Island") or obj.Name:find("World") or obj.Name:find("Zone") or 
+           obj.Name:lower():find("season") or obj.Name:lower():find("temp") or obj.Name:lower():find("event") then
+            print(obj.Name)
+        end
+    end
 end)
 
--- Actualizar F9 para solo Mundos + Luminarch
+-- F9 actualizado
 UserInputService.InputBegan:Connect(function(i, gpe)
     if gpe then return end
     if i.KeyCode == Enum.KeyCode.F9 then
-        ScanWorldsAndIslands()
-        task.wait(0.3)
-        FindAndTeleportToLuminarch()
+        ScanBtn:FireButton1Click()
     end
 end)
 

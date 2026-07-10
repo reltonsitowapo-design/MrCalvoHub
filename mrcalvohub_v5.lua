@@ -1174,93 +1174,84 @@ local function FindAndTeleportToLuminarch()
     
     for _, obj in ipairs(Workspace:GetDescendants()) do
         local name = obj.Name
-        local isPossible = false
-        
-        -- Búsqueda por nombre
-        if name:lower():find("luminarch") or 
-           name:find("Pet0_96") or name:find("Pet0_98") or 
-           name:find("096") or name:find("098") then
-            isPossible = true
-        end
-
         local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
         if not part then continue end
 
-        local health = nil
-        local level = nil
-
-        -- Buscar atributos de vida y nivel
-        pcall(function()
-            if obj:GetAttribute("Health") then 
-                health = obj:GetAttribute("Health") 
-            elseif obj:GetAttribute("MaxHealth") then 
-                health = obj:GetAttribute("MaxHealth") 
-            end
-            if obj:GetAttribute("Level") then 
-                level = obj:GetAttribute("Level") 
-            end
-        end)
-
-        -- Buscar en Humanoid si existe
+        local health, level = nil, nil
         local hum = obj:FindFirstChildOfClass("Humanoid")
         if hum then
-            health = hum.MaxHealth or health
-            level = hum:GetAttribute("Level") or level
+            health = hum.MaxHealth
+            level = hum:GetAttribute("Level") or hum.Level
         end
 
         local dist = math.floor((part.Position - root.Position).Magnitude)
 
-        if isPossible or (health and health >= 7000 and health <= 9000) or (level == 180) then
+        if name:lower():find("luminarch") or name:find("Pet0_96") or name:find("Pet0_98") or 
+           (health and health >= 7000 and health <= 9000) or (level == 180) then
             table.insert(candidates, {
-                name = name,
-                dist = dist,
-                health = health or "???",
-                level = level or "???",
-                part = part,
-                obj = obj
+                name = name, 
+                dist = dist, 
+                health = health or "???", 
+                level = level or "???", 
+                part = part
             })
-            
-            print(string.format("   %d studs | HP: %s | Lv: %s → %s", dist, health or "???", level or "???", name))
         end
     end
 
     if #candidates == 0 then
-        print("❌ No se encontró ningún candidato que coincida con Luminarch (Boss).")
-        print("   Prueba cambiar de servidor o entrar a otro mundo.")
+        print("❌ No se encontró Luminarch en este servidor.")
         return
     end
 
-    print("\n📋 Candidatos encontrados (" .. #candidates .. "):")
     table.sort(candidates, function(a,b) return a.dist < b.dist end)
+    local target = candidates[1].part
 
-    local target = nil
-
-    for _, c in ipairs(candidates) do
-        print(string.format("   [%d studs] %s | HP:%s | Lv:%s", c.dist, c.name, c.health, c.level))
-        
-        -- Prioridad: El que mejor coincida
-        if (c.name:lower():find("luminarch") or c.name:find("Pet0_96") or c.name:find("Pet0_98")) and 
-           (c.health == "???" or (c.health >= 7000 and c.health <= 9000)) then
-            target = c.part
-            print("✅ ¡LUMINARCH DETECTADO!")
-            break
-        end
-    end
-
-    if not target then
-        target = candidates[1].part
-        print("⚠️ Usando el más cercano como fallback.")
-    end
-
-    if target then
-        root.CFrame = target.CFrame * CFrame.new(0, 8, -States.TeleportOffset)
-        print("🚀 Teleportado al objetivo!")
-    end
+    root.CFrame = target.CFrame * CFrame.new(0, 8, -States.TeleportOffset)
+    print("🚀 Teleportado a Luminarch! (" .. candidates[1].name .. ")")
 end
 
--- Botón
-local LuminarchBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Boss 8000HP)", NxtO())
-LuminarchBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
+-- Función para listar Mundos / Islas
+local function ScanWorldsAndIslands()
+    print("\n=== 🌍 MUNDOS E ISLAS DETECTADAS ===")
+    local count = 0
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj.Name:find("World") or obj.Name:find("Island") or obj.Name:find("Zone") or 
+           obj.Name:find("Map") or obj.Name:lower():find("lumin") or obj.Name:lower():find("boss") then
+            local isLocked = obj.Name:lower():find("lock") or obj.Name:lower():find("block") or false
+            print(string.format("%s %s", isLocked and "🔒" or "🌍", obj.Name))
+            count += 1
+        end
+    end
+    print("Total detectados: " .. count)
+end
+
+-- ====================== BOTONES NUEVOS ======================
+
+-- Botón Luminarch
+local LumiBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Boss 8000HP)", NxtO())
+LumiBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
+
+-- Botón Listar Mundos
+local WorldsBtn, _ = MakePurpleBtn(CW, "🌍 Listar Mundos e Islas", NxtO())
+WorldsBtn.MouseButton1Click:Connect(ScanWorldsAndIslands)
+
+-- Botón Combinado (Mundo + Luminarch)
+local CombinedBtn, _ = MakePurpleBtn(CW, "🌍 TP a Mundo Luminarch + Boss", NxtO())
+CombinedBtn.MouseButton1Click:Connect(function()
+    ScanWorldsAndIslands()
+    task.wait(0.5)
+    FindAndTeleportToLuminarch()
+end)
+
+-- Actualizar F9 para solo Mundos + Luminarch
+UserInputService.InputBegan:Connect(function(i, gpe)
+    if gpe then return end
+    if i.KeyCode == Enum.KeyCode.F9 then
+        ScanWorldsAndIslands()
+        task.wait(0.3)
+        FindAndTeleportToLuminarch()
+    end
+end)
 
 local CT=MakeCard(ScrollEvo,3); MakeCardTitle(CT,"TELEPORT SETTINGS")
 MakeToggle(CT,"Teleport to Pet",States.TeleportEnabled,function(v) States.TeleportEnabled=v end)

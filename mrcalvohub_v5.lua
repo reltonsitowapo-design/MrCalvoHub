@@ -1164,69 +1164,74 @@ end
 local function FindAndTeleportToLuminarch()
     local root = GetRoot()
     if not root then 
-        print("[MrCalvoHub] No se encontró HumanoidRootPart") 
+        print("[MrCalvoHub] ❌ No se encontró tu personaje") 
         return 
     end
 
-    local targets = {"Pet0_96", "Pet0_98", "Luminarch", "096", "098"}
-    local found = nil
-    local bestDist = math.huge
+    print("🔍 Buscando Luminarch... (lista de candidatos)")
 
-    print("[MrCalvoHub] Buscando Luminarch globalmente...")
-
-    -- Buscar en Workspace (mundo actual)
+    local candidates = {}
+    
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        for _, t in ipairs(targets) do
-            if obj.Name:find(t) or (obj.Name:lower():find("luminarch")) then
-                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                if part then
-                    local dist = (part.Position - root.Position).Magnitude
-                    print("→ Encontrado: " .. obj.Name .. " | Dist: " .. math.floor(dist) .. " studs")
-                    if dist < bestDist then
-                        bestDist = dist
-                        found = part
-                    end
-                end
+        local name = obj.Name
+        if name:find("Pet0_") or name:lower():find("lumin") then
+            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+            if part then
+                local dist = math.floor((part.Position - root.Position).Magnitude)
+                
+                table.insert(candidates, {
+                    name = name,
+                    dist = dist,
+                    part = part
+                })
+                
+                print(string.format("   %d studs → %s", dist, name))
             end
         end
     end
 
-    -- Buscar también en ReplicatedStorage (por si está precargado)
-    if not found then
-        pcall(function()
-            for _, obj in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                for _, t in ipairs(targets) do
-                    if obj.Name:find(t) or (obj.Name:lower():find("luminarch")) then
-                        local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                        if part then
-                            print("→ Encontrado en ReplicatedStorage: " .. obj.Name)
-                            found = part
-                            break
-                        end
-                    end
-                end
-                if found then break end
-            end
-        end)
+    if #candidates == 0 then
+        print("❌ No se encontró ningún Pet0_ ni nada relacionado con Luminarch en este servidor.")
+        return
     end
 
-    if found then
-        local offset = CFrame.new(0, 5, -States.TeleportOffset)
-        root.CFrame = found.CFrame * offset
-        print("✅ Teleportado a Luminarch (" .. found.Parent.Name .. ")")
+    print("\n📋 " .. #candidates .. " candidato(s) encontrado(s):")
+
+    -- Ordenar por distancia
+    table.sort(candidates, function(a,b) return a.dist < b.dist end)
+
+    local target = nil
+
+    for _, c in ipairs(candidates) do
+        print(string.format("   [%d studs] %s", c.dist, c.name))
         
-        -- Nudge extra si está muy lejos
-        if bestDist > 100 then
-            task.wait(0.2)
-            root.Velocity = (found.Position - root.Position).Unit * 80
+        -- Prioridad alta: nombres más específicos de Luminarch
+        if c.name:lower():find("luminarch") or 
+           c.name:find("Pet0_96") or 
+           c.name:find("Pet0_098") or 
+           c.name:find("Pet0_96") then
+            target = c.part
+            print("✅ Objetivo prioritario encontrado: " .. c.name)
+            break
         end
+    end
+
+    -- Si no encontró prioritario, tomar el más cercano
+    if not target and #candidates > 0 then
+        target = candidates[1].part
+        print("⚠️ Tomando el más cercano como fallback: " .. candidates[1].name)
+    end
+
+    if target then
+        root.CFrame = target.CFrame * CFrame.new(0, 6, -States.TeleportOffset)
+        print("🚀 Teleportado correctamente a Luminarch!")
     else
-        print("❌ Luminarch no encontrado en este servidor. Prueba Server Hop o cambia de mundo.")
+        print("❌ No se pudo seleccionar un objetivo válido.")
     end
 end
 
--- Botón nuevo
-local LuminarchBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Global)", NxtO())
+-- Botón
+local LuminarchBtn, _ = MakePurpleBtn(CW, "🔍 TP a Luminarch (Lista + TP)", NxtO())
 LuminarchBtn.MouseButton1Click:Connect(FindAndTeleportToLuminarch)
 
 local CT=MakeCard(ScrollEvo,3); MakeCardTitle(CT,"TELEPORT SETTINGS")
